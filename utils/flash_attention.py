@@ -14,11 +14,19 @@ import sys
 import subprocess
 from typing import Optional
 import types
+import importlib.machinery
+import importlib.util
 
 
 def _try_import_flash_attn() -> tuple[bool, str]:
     try:
         import flash_attn  # noqa: F401
+
+        # A partially-imported module (e.g., from a prior failed import) can end up
+        # in sys.modules with __spec__ = None. Some Transformers checks call
+        # importlib.util.find_spec('flash_attn') which then raises ValueError.
+        if getattr(flash_attn, "__spec__", None) is None:
+            return False, "spec_none"
 
         # If we previously injected a stub, treat it as unavailable.
         ver = str(getattr(flash_attn, "__version__", ""))
@@ -48,22 +56,42 @@ def patch_broken_flash_attn(*, logger=None) -> bool:
     if ok:
         return False
 
-    # Only patch for "binary present but broken" situations.
+    # We patch in two cases:
+    # 1) A real broken wheel (undefined symbols / missing .so, etc)
+    # 2) A previously injected stub (so Transformers import-time checks don't error)
     reason_l = (reason or "").lower()
-    triggers = (
-        "undefined symbol",
-        "cannot open shared object file",
-        "version `glibc",
-        "flash_attn_2_cuda",
-    )
-    if not any(t in reason_l for t in triggers):
-        return False
+    if reason in ("stubbed", "spec_none"):
+        pass
+    else:
+        triggers = (
+            "undefined symbol",
+            "cannot open shared object file",
+            "version `glibc",
+            "flash_attn_2_cuda",
+            "__spec__ is none",
+        )
+        if not any(t in reason_l for t in triggers):
+            return False
 
     if logger is not None:
         try:
             logger.warning(f"Detected broken flash_attn install ({reason}); stubbing it out so Transformers can import.")
         except Exception:
             pass
+
+    # Transformers uses `importlib.util.find_spec('flash_attn')` to decide whether
+    # to import FlashAttention code paths at *import time* for some models.
+    # If a broken wheel is present, we must force that check to return "not available"
+    # to prevent transformers from importing `flash_attn`.
+    if not hasattr(importlib.util, "_qwen_find_spec_orig"):
+        importlib.util._qwen_find_spec_orig = importlib.util.find_spec  # type: ignore[attr-defined]
+
+        def _qwen_find_spec(name: str, package: str | None = None):
+            if name == 'flash_attn' or name.startswith('flash_attn.'):
+                return None
+            return importlib.util._qwen_find_spec_orig(name, package)  # type: ignore[attr-defined]
+
+        importlib.util.find_spec = _qwen_find_spec  # type: ignore[assignment]
 
     # Remove any partially-imported modules.
     for k in list(sys.modules.keys()):
@@ -77,19 +105,26 @@ def patch_broken_flash_attn(*, logger=None) -> bool:
         )
 
     # Create a stub package and common submodules referenced by Transformers.
+    # NOTE: Transformers checks `importlib.util.find_spec('flash_attn')`. If a module
+    # exists in sys.modules but has `__spec__ is None`, Python raises
+    # ValueError("flash_attn.__spec__ is None"). So we must set a real ModuleSpec.
     pkg = types.ModuleType('flash_attn')
-    pkg.__path__ = []  # mark as package
     pkg.__version__ = '0.0.0-stub'
+    pkg.__path__ = []  # mark as package
+    pkg.__spec__ = importlib.machinery.ModuleSpec(name='flash_attn', loader=None, is_package=True)
+    pkg.__spec__.submodule_search_locations = []
 
     bert_padding = types.ModuleType('flash_attn.bert_padding')
     bert_padding.index_first_axis = _not_available
     bert_padding.pad_input = _not_available
     bert_padding.unpad_input = _not_available
+    bert_padding.__spec__ = importlib.machinery.ModuleSpec(name='flash_attn.bert_padding', loader=None, is_package=False)
 
     iface = types.ModuleType('flash_attn.flash_attn_interface')
     iface.flash_attn_func = _not_available
     iface.flash_attn_varlen_func = _not_available
     iface.flash_attn_with_kvcache = _not_available
+    iface.__spec__ = importlib.machinery.ModuleSpec(name='flash_attn.flash_attn_interface', loader=None, is_package=False)
 
     sys.modules['flash_attn'] = pkg
     sys.modules['flash_attn.bert_padding'] = bert_padding

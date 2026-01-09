@@ -110,6 +110,25 @@ class QuantizationPipeline:
             '--bits', str(self.config['spinquant']['bits'])
         ]
 
+        # SpinQuant-lite backend selection.
+        # IMPORTANT: `scripts/spinquant.py` defaults to blockwise_givens, which can
+        # be extremely slow. If you want the fast fixed rotation path, you must
+        # pass `--backend hadamard` explicitly.
+        backend = str(self.config.get('spinquant', {}).get('backend', 'blockwise_givens'))
+        cmd.extend(['--backend', backend])
+
+        # Pass through key SpinQuant-lite knobs so pipeline_config.yaml is honored.
+        if 'block_size' in self.config.get('spinquant', {}):
+            cmd.extend(['--block_size', str(self.config['spinquant']['block_size'])])
+        if 'num_steps' in self.config.get('spinquant', {}):
+            cmd.extend(['--num_steps', str(self.config['spinquant']['num_steps'])])
+        if 'lr' in self.config.get('spinquant', {}):
+            cmd.extend(['--lr', str(self.config['spinquant']['lr'])])
+        if 'num_sweeps' in self.config.get('spinquant', {}):
+            cmd.extend(['--num_sweeps', str(self.config['spinquant']['num_sweeps'])])
+        if 'max_layers' in self.config.get('spinquant', {}):
+            cmd.extend(['--max_layers', str(self.config['spinquant']['max_layers'])])
+
         # Optional fast path: skip rotation learning.
         if bool(self.config['spinquant'].get('skip_rotations', False)):
             cmd.append('--skip_rotations')
