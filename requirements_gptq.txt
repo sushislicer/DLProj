@@ -1,0 +1,11 @@
+# Optional GPTQ-related dependencies
+#
+# This repository's default benchmark runner uses BitsAndBytes 4-bit quantization
+# (`bnb_4bit`) and does NOT require GPTQ.
+#
+# If you want to experiment with GPTQ baselines, install these AFTER installing
+# PyTorch (CUDA) to avoid build failures.
+
+auto-gptq>=0.7.0
+optimum>=1.14.0
+

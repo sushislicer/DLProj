@@ -1,4 +1,7 @@
 # Core dependencies
+# NOTE: On GPU servers you often want to install a CUDA-enabled PyTorch wheel
+# explicitly before installing the rest of the requirements (see
+# [`docs/BENCHMARKING_GUIDE.md`](docs/BENCHMARKING_GUIDE.md:30)).
 torch>=2.0.0
 transformers>=4.35.0
 accelerate>=0.24.0
@@ -7,8 +10,10 @@ bitsandbytes>=0.41.0
 psutil>=5.9.0
 
 # Quantization
-auto-gptq>=0.7.0
-optimum>=1.14.0
+# Optional: GPTQ tooling (not required for the benchmark runner's 4-bit BnB path).
+# `auto-gptq` frequently compiles native/CUDA extensions and may fail if PyTorch
+# is not installed yet. Install from [`requirements_gptq.txt`](requirements_gptq.txt:1)
+# after PyTorch is available.
 
 # PiSSA
 # Install from: https://github.com/hiyouga/PiSSA

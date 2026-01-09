@@ -31,6 +31,16 @@ echo ""
 
 # Install dependencies
 echo "Installing dependencies..."
+
+# Ensure PyTorch is installed first (needed for some optional native extensions).
+if ! "$PYTHON_BIN" -c "import torch" >/dev/null 2>&1; then
+  echo "Error: PyTorch is not installed in this environment."
+  echo "Install a CUDA-enabled torch wheel first (example):"
+  echo "  pip install --index-url https://download.pytorch.org/whl/cu124 torch torchvision torchaudio"
+  echo "Then re-run this script."
+  exit 1
+fi
+
 pip install -q -r requirements.txt
 echo "✓ Dependencies installed"
 echo ""

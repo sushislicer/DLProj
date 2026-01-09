@@ -28,8 +28,21 @@ clone the repo under your home directory (e.g. `~/DLProj`).
 # SSH to your server, then:
 cd ~/DLProj
 
-# Install dependencies
+# Install CUDA-enabled PyTorch first (recommended on GPU servers)
+pip install --upgrade pip
+pip install --index-url https://download.pytorch.org/whl/cu124 torch torchvision torchaudio
+
+# If your server uses CUDA 12.1 instead, use:
+# pip install --index-url https://download.pytorch.org/whl/cu121 torch torchvision torchaudio
+
+# Verify CUDA is visible to torch
+python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda, 'is_available', torch.cuda.is_available())"
+
+# Install remaining dependencies
 pip install -r requirements.txt
+
+# Optional (only if you need GPTQ tooling)
+# pip install -r requirements_gptq.txt
 ```
 
 ### Fast Benchmarking (Recommended)
