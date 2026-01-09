@@ -8,8 +8,10 @@ The goal is not to provide a tight new bound, but to make explicit the shared st
 Let $\theta$ denote base weights and $\phi$ denote adapter parameters.
 We can view the deployment-constrained objective as
 \begin{equation}
-  \min_{\phi,\,\{\R_\ell\}}\; \E\,\ell\Big(f\big(x;\{\Q_b(\W_\ell\R_\ell),\phi\}\big),y\Big)
-  \quad \text{s.t.}\; \R_\ell^\top\R_\ell=\I,\; \mathrm{rank}(\Delta\W_\ell)\le r.
+  \begin{aligned}
+    \min_{\phi,\,\{\R_\ell\}}\;& \E\,\ell\Big(f\big(x;\{\Q_b(\W_\ell\R_\ell),\phi\}\big),y\Big)\\
+    \text{s.t.}\;& \R_\ell^\top\R_\ell=\I,\qquad \mathrm{rank}(\Delta\W_\ell)\le r.
+  \end{aligned}
   \label{eq:joint_obj}
 \end{equation}
 Here $\ell$ indexes linear layers, $\Delta\W_\ell$ is the low-rank update induced by adapters, and $\Q_b$ is a low-bit quantizer.
@@ -39,4 +41,3 @@ When applied to adapter parameters (already low-dimensional), this can stabilize
 \subsection{Putting it together}
 Under quantized deployment, training should account for quantization-induced perturbations.
 \method operationalizes this principle: PiSSA gives a strong low-rank starting point, SpinQuant-lite reduces quantization error of the (residual) base weights by orthogonal mixing, and GaLore accelerates adapter optimization under tight budgets.
-

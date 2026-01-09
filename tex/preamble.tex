@@ -20,6 +20,21 @@
 \setlist[itemize]{leftmargin=*,noitemsep,topsep=2pt}
 \setlist[enumerate]{leftmargin=*,noitemsep,topsep=2pt}
 
+% Code blocks (for long shell commands; supports line breaking)
+\usepackage{listings}
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  breakatwhitespace=true,
+  columns=fullflexible,
+  frame=single,
+  framerule=0.2pt,
+  xleftmargin=0.5em,
+  xrightmargin=0.5em,
+  aboveskip=0.75em,
+  belowskip=0.75em
+}
+
 % Cross-references
 \usepackage[capitalize,noabbrev]{cleveref}
 
@@ -37,7 +52,8 @@
 \newcommand{\E}{\mathbb{E}}
 
 % Project/method naming
-\newcommand{\method}{PiSSA\textendash SpinQuant\textendash GaLore\xspace}
+% Use TeX-native double hyphens to avoid any \textendash package/dependency quirks.
+\newcommand{\method}{PiSSA--SpinQuant--GaLore\xspace}
 \newcommand{\qwen}{Qwen2.5\xspace}
 
 %%
@@ -57,7 +73,11 @@
 %% work harder in optimizing text layout. Typically shrinks text by 1/6 of page, enable
 %% it at the very end of the writing process, when you are just above the page limit
 %%
-% \usepackage{microtype}
+\usepackage{microtype}
+
+% Help TeX avoid overfull boxes by allowing slightly more stretch.
+% This is a standard, review-safe mitigation for long tokens/URLs/equations.
+\setlength{\emergencystretch}{1em}
 
 %%
 %% fine-tune paragraph spacing

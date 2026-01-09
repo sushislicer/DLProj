@@ -501,11 +501,41 @@ class GaLoreTrainer:
                 # g: [m, n]
                 m, n = g.shape
                 k = max(1, min(self.rank, m, n))
-                # Full SVD is fine for adapter-sized matrices.
-                U, S, Vh = torch.linalg.svd(g, full_matrices=False)
-                U_k = U[:, :k]
-                V_k = Vh[:k, :].t()  # [n, k]
-                return U_k, V_k
+                # Full SVD is fine for adapter-sized matrices, but the default CUDA
+                # driver can fail to converge on ill-conditioned gradients.
+                # Be robust:
+                # 1) run SVD in float32
+                # 2) if CUDA SVD fails, fall back to CPU
+                # 3) if CPU also fails, fall back to QR-based bases
+
+                dev = g.device
+                dtype = g.dtype
+                g32 = g.detach().to(dtype=torch.float32)
+
+                def _svd_basis(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+                    U, _S, Vh = torch.linalg.svd(x, full_matrices=False)
+                    U_k = U[:, :k]
+                    V_k = Vh[:k, :].t()  # [n, k]
+                    return U_k, V_k
+
+                try:
+                    U_k, V_k = _svd_basis(g32)
+                except Exception as e_cuda:
+                    # CPU fallback
+                    try:
+                        U_k, V_k = _svd_basis(g32.cpu())
+                        U_k = U_k.to(device=dev)
+                        V_k = V_k.to(device=dev)
+                    except Exception:
+                        # Last-resort fallback: QR bases
+                        # U from QR(g), V from QR(g^T)
+                        q1, _ = torch.linalg.qr(g32, mode='reduced')
+                        q2, _ = torch.linalg.qr(g32.t(), mode='reduced')
+                        U_k = q1[:, :k]
+                        V_k = q2[:, :k]
+
+                # Cast back to match gradient dtype
+                return U_k.to(dtype=dtype), V_k.to(dtype=dtype)
 
             def _project(self, g: torch.Tensor, U: torch.Tensor, V: torch.Tensor) -> torch.Tensor:
                 # Project g onto span(U) x span(V)

@@ -29,13 +29,12 @@ For the pipeline, the key configuration choices are:
 \subsection{Implementation and hardware}
 All experiments are run through the provided scripts.
 For example, a typical run executes the pipeline and then benchmarks:
-\begin{verbatim}
+\begin{lstlisting}
 python3 scripts/run_benchmarks.py \
   --config configs/benchmark_config_4x5090.yaml \
   --model_sizes 14B --num_gpus 4 --time_budget 4 \
   --quantize --run_pipeline --pipeline_config configs/pipeline_config.yaml \
   --pipeline_output_root outputs/pipeline --run_baselines
-\end{verbatim}
+\end{lstlisting}
 
 We report performance metrics (accuracy/pass@1 and throughput/latency) and system memory usage as logged by the benchmark runner.
-
