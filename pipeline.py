@@ -446,6 +446,13 @@ def main():
         config['model_name'] = args.model_name
     if args.output_dir:
         config['output_dir'] = args.output_dir
+
+    # Important: keep pipeline stage progress isolated per output directory.
+    # ProgressTracker persists state to <log_dir>/progress.txt.
+    # If log_dir is shared across multiple runs (e.g., different model sizes),
+    # a previous run can cause a new run to incorrectly resume at a later stage,
+    # leading to missing artifacts like `residual_model/`.
+    config['log_dir'] = os.path.join(config['output_dir'], 'logs')
     
     # Run pipeline
     pipeline = QuantizationPipeline(config, logger)
