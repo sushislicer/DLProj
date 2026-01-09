@@ -336,6 +336,12 @@ baselines:
     name: "Pipeline (Ours) 4-bit"
     description: "Base model in 4-bit + our pipeline adapters (if provided)"
     # Can be a string path, or a map like {default: "...", 7B: "...", 14B: "..."}
+    # Recommended when running pipeline for all sizes via `scripts/run_pipeline_multi.py`:
+    # adapter_path:
+    #   0.5B: "outputs/pipeline/0.5B/trained_adapters"
+    #   7B: "outputs/pipeline/7B/trained_adapters"
+    #   14B: "outputs/pipeline/14B/trained_adapters"
+    #   72B: "outputs/pipeline/72B/trained_adapters"
     adapter_path: null
 
   # 4-bit quantization baseline (no adapters)
@@ -349,8 +355,8 @@ baselines:
   # 4-bit quantization with LoRA adapters baseline
   quantization_4bit_lora:
     enabled: true  # Set to true to enable baseline comparison
-    name: "4-bit Quantization + LoRA"
-    description: "Base model with 4-bit quantization and LoRA adapters"
+    name: "4-bit Quantization + LoRA (Baseline)"
+    description: "Base model with 4-bit quantization and LoRA adapters baseline"
     quantization: "4bit"
     use_adapters: true
     # QLoRA adapter baseline path.
@@ -358,7 +364,7 @@ baselines:
     # - a local PEFT adapter directory, OR
     # - a HuggingFace Hub repo id like "org/repo" (optionally "org/repo@revision");
     #   it will be downloaded automatically into `evaluation.cache_dir`.
-    adapter_path: "outputs/qlora_adapters"  # or "org/repo[@rev]"
+    adapter_path: "outputs/lora_adapters"  # or "org/repo[@rev]"
     adapter_config:
       r: 16
       lora_alpha: 32

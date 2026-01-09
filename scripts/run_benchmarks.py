@@ -428,7 +428,7 @@ class BenchmarkRunner:
         # When `--run_baselines` is enabled, we instead run a triad:
         #   1) pipeline_4bit ("our pipeline" in 4-bit; typically base 4-bit + our adapters)
         #   2) baseline_4bit (native 4-bit, no adapters)
-        #   3) baseline_4bit_qlora (4-bit base + QLoRA adapters)
+        #   3) baseline_4bit_lora (4-bit base + LoRA adapters baseline)
         # This avoids accidentally benchmarking the same "no-adapter" model twice.
 
         baselines_cfg = self.config.get('baselines', {})
@@ -489,14 +489,14 @@ class BenchmarkRunner:
         if b1.get('enabled', False):
             variants.append(_mk_variant(model_config, 'baseline_4bit', b1))
 
-        # 4-bit QLoRA baseline (4-bit base + adapters)
+        # 4-bit LoRA baseline (4-bit base + adapters)
         b2 = baselines_cfg.get('quantization_4bit_lora', {})
         if b2.get('enabled', False):
-            cand = _mk_variant(model_config, 'baseline_4bit_qlora', b2)
+            cand = _mk_variant(model_config, 'baseline_4bit_lora', b2)
             ap = cand.get('adapter_path')
             if not ap:
                 self.logger.warning(
-                    "Skipping baseline_4bit_qlora because adapter_path is missing. "
+                    "Skipping baseline_4bit_lora because adapter_path is missing. "
                     f"Set baselines.quantization_4bit_lora.adapter_path to a valid PEFT adapter directory. Got: {ap}"
                 )
             else:
@@ -505,7 +505,7 @@ class BenchmarkRunner:
                     variants.append(cand)
                 else:
                     self.logger.warning(
-                        "Skipping baseline_4bit_qlora because adapter_path is neither an existing local path nor a valid Hub repo id. "
+                        "Skipping baseline_4bit_lora because adapter_path is neither an existing local path nor a valid Hub repo id. "
                         f"Got: {ap}"
                     )
 
