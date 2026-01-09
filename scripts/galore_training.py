@@ -260,6 +260,7 @@ class GaLoreTrainer:
         training_args = TrainingArguments(
             output_dir=os.path.join(self.config['output_dir'], 'checkpoints'),
             num_train_epochs=self.config.get('num_epochs', 3),
+            max_steps=(int(self.config.get('max_steps', 0)) if int(self.config.get('max_steps', 0)) > 0 else -1),
             per_device_train_batch_size=self.config.get('batch_size', 4),
             gradient_accumulation_steps=self.config.get('gradient_accumulation_steps', 4),
             learning_rate=self.config['galore']['learning_rate'],
@@ -269,7 +270,7 @@ class GaLoreTrainer:
             save_steps=self.config.get('save_steps', 500),
             save_total_limit=self.config.get('save_total_limit', 3),
             fp16=True,
-            gradient_checkpointing=True,
+            gradient_checkpointing=bool(self.config.get('gradient_checkpointing', True)),
             optim='adamw_torch',  # We'll use custom GaLore optimizer
             report_to=report_to,
             logging_dir=os.path.join(self.config['output_dir'], 'logs'),
@@ -654,6 +655,12 @@ def main():
         help='Dataset name'
     )
 
+    parser.add_argument('--max_samples', type=int, default=2000, help='Max training samples (cap for speed)')
+    parser.add_argument('--max_length', type=int, default=256, help='Max sequence length for training (cap for speed)')
+    parser.add_argument('--gradient_accumulation_steps', type=int, default=2, help='Gradient accumulation steps')
+    parser.add_argument('--max_steps', type=int, default=800, help='Optional hard cap on optimizer steps (overrides epochs if > 0)')
+    parser.add_argument('--no_gradient_checkpointing', action='store_true', help='Disable gradient checkpointing (faster, higher memory)')
+
     # Distillation
     parser.add_argument(
         '--teacher_model_path',
@@ -684,15 +691,17 @@ def main():
         'seed': 42,
         'dataset': args.dataset,
         'dataset_split': 'train',
-        'max_samples': 10000,
-        'max_length': 512,
+        'max_samples': int(args.max_samples),
+        'max_length': int(args.max_length),
         'num_epochs': args.num_epochs,
         'batch_size': args.batch_size,
-        'gradient_accumulation_steps': 4,
+        'gradient_accumulation_steps': int(args.gradient_accumulation_steps),
+        'max_steps': int(args.max_steps),
         'warmup_steps': 100,
         'logging_steps': 10,
         'save_steps': 500,
         'save_total_limit': 3,
+        'gradient_checkpointing': (not bool(args.no_gradient_checkpointing)),
         'galore': {
             'rank': args.rank,
             'learning_rate': args.learning_rate,

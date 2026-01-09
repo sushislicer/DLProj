@@ -18,13 +18,17 @@ wandb:
 
 # Training Configuration
 seed: 42
-num_epochs: 3
+num_epochs: 1  # keep pipeline training short by default
 batch_size: 4
-gradient_accumulation_steps: 4
+gradient_accumulation_steps: 2
 warmup_steps: 100
 logging_steps: 10
 save_steps: 500
 save_total_limit: 3
+
+# Optional cap on total optimizer steps (overrides epochs if set).
+# This is the main knob to keep GaLore training bounded.
+max_steps: 800
 
 # Dataset Configuration
 # NOTE: This dataset is used for *adapter training* in the pipeline (PiSSA/SpinQuant/GaLore).
@@ -34,7 +38,8 @@ save_total_limit: 3
 dataset: "c4"
 dataset_split: "train"
 max_samples: 10000
-max_length: 512
+max_samples: 2000
+max_length: 256
 
 # PiSSA Configuration
 pissa:
@@ -60,13 +65,13 @@ spinquant:
   symmetric: false
   backend: "blockwise_givens"
   block_size: 64
-  num_steps: 50
+  num_steps: 20
   lr: 0.05
   num_sweeps: 2
-  max_layers: 16
+  max_layers: 8
   use_bnb_quantization: true
   use_activation_objective: true
-  calibration_vectors_per_layer: 512
+  calibration_vectors_per_layer: 256
   keep_fp16_modules:
     - "input_embeddings"
     - "output_embeddings"

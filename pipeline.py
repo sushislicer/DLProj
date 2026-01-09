@@ -170,6 +170,18 @@ class QuantizationPipeline:
             '--batch_size', str(self.config.get('batch_size', 4))
         ]
 
+        # Speed/compute caps
+        if 'max_samples' in self.config:
+            cmd.extend(['--max_samples', str(self.config.get('max_samples'))])
+        if 'max_length' in self.config:
+            cmd.extend(['--max_length', str(self.config.get('max_length'))])
+        if 'gradient_accumulation_steps' in self.config:
+            cmd.extend(['--gradient_accumulation_steps', str(self.config.get('gradient_accumulation_steps'))])
+        if 'max_steps' in self.config:
+            cmd.extend(['--max_steps', str(self.config.get('max_steps'))])
+        if self.config.get('gradient_checkpointing', None) is False:
+            cmd.append('--no_gradient_checkpointing')
+
         # Optional: post-quant distillation.
         distill_cfg = self.config.get('distill', {})
         if distill_cfg.get('enabled', False):
@@ -298,11 +310,16 @@ def create_default_config():
         'output_dir': 'outputs',
         'log_dir': 'logs',
         'seed': 42,
-        'num_epochs': 3,
+        # Keep default training time bounded.
+        'num_epochs': 1,
         'batch_size': 4,
+        'gradient_accumulation_steps': 2,
+        'max_steps': 800,
         # NOTE: This dataset is for *adapter training* in the pipeline.
         # Benchmark datasets (AIME/MATH/GPQA/...) are configured separately.
         'dataset': 'c4',
+        'max_samples': 2000,
+        'max_length': 256,
         'pissa': {
             'rank': 64,
             'alpha': 128,
@@ -322,13 +339,13 @@ def create_default_config():
             # SpinQuant-lite backend (blockwise Givens rotations)
             'backend': 'blockwise_givens',
             'block_size': 64,
-            'num_steps': 50,
+            'num_steps': 20,
             'lr': 0.05,
             'num_sweeps': 2,
-            'max_layers': 16,
+            'max_layers': 8,
             'use_bnb_quantization': True,
             'use_activation_objective': True,
-            'calibration_vectors_per_layer': 512,
+            'calibration_vectors_per_layer': 256,
         },
         'galore': {
             'rank': 128,
