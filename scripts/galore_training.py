@@ -233,6 +233,29 @@ class GaLoreTrainer:
         # Create optimizer
         optimizer = self.create_galore_optimizer(self.model)
         
+        # Optional logging integrations
+        report_to = []
+        if bool(self.config.get('use_tensorboard', True)):
+            report_to.append('tensorboard')
+        if bool(self.config.get('use_wandb', False)):
+            # Best-effort W&B enablement.
+            # Default to offline unless explicitly configured otherwise.
+            try:
+                import wandb  # noqa: F401
+
+                wb = self.config.get('wandb', {}) if isinstance(self.config.get('wandb', {}), dict) else {}
+                if wb.get('project'):
+                    os.environ.setdefault('WANDB_PROJECT', str(wb['project']))
+                if wb.get('entity'):
+                    os.environ.setdefault('WANDB_ENTITY', str(wb['entity']))
+                if wb.get('mode'):
+                    os.environ.setdefault('WANDB_MODE', str(wb['mode']))
+                else:
+                    os.environ.setdefault('WANDB_MODE', 'offline')
+                report_to.append('wandb')
+            except Exception:
+                self.logger.warning('use_wandb=true but wandb is not installed/importable; continuing without wandb')
+
         # Training arguments
         training_args = TrainingArguments(
             output_dir=os.path.join(self.config['output_dir'], 'checkpoints'),
@@ -248,7 +271,7 @@ class GaLoreTrainer:
             fp16=True,
             gradient_checkpointing=True,
             optim='adamw_torch',  # We'll use custom GaLore optimizer
-            report_to=['tensorboard'],
+            report_to=report_to,
             logging_dir=os.path.join(self.config['output_dir'], 'logs'),
             remove_unused_columns=False,
             ddp_find_unused_parameters=False,

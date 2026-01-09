@@ -61,10 +61,81 @@ class BenchmarkRunner:
             'system_info': self._get_system_info(),
             'benchmarks': {}
         }
+
+        # Optional experiment tracking
+        self._tb_writer = None
+        self._wandb = None
+        self._wandb_run = None
+        self._setup_tracking()
         
         self.logger.info("=" * 80)
         self.logger.info("QWEN2.5 BENCHMARK RUNNER")
         self.logger.info("=" * 80)
+
+    def _setup_tracking(self) -> None:
+        """Initialize TensorBoard/W&B if enabled in config.
+
+        Safe to call even if deps aren’t installed; will log and continue.
+        """
+        log_cfg = self.config.get('logging', {}) if isinstance(self.config.get('logging', {}), dict) else {}
+
+        # TensorBoard
+        tb_cfg = log_cfg.get('tensorboard', {}) if isinstance(log_cfg.get('tensorboard', {}), dict) else {}
+        if bool(tb_cfg.get('enabled', False)):
+            try:
+                from torch.utils.tensorboard import SummaryWriter
+
+                tb_dir = str(tb_cfg.get('log_dir') or os.path.join(log_cfg.get('log_dir', 'logs'), 'tensorboard'))
+                ensure_dir(tb_dir)
+                run_name = os.path.basename(self.output_dir.rstrip('/'))
+                self._tb_writer = SummaryWriter(log_dir=os.path.join(tb_dir, run_name))
+                self._tb_writer.add_text('config', json.dumps(self.config, indent=2), 0)
+                self.logger.info(f"TensorBoard enabled. Logdir: {tb_dir}")
+            except Exception as e:
+                self.logger.warning(f"TensorBoard requested but not available: {e}")
+
+        # Weights & Biases
+        wb_cfg = log_cfg.get('wandb', {}) if isinstance(log_cfg.get('wandb', {}), dict) else {}
+        if bool(wb_cfg.get('enabled', False)):
+            try:
+                import wandb
+
+                mode = str(wb_cfg.get('mode') or os.environ.get('WANDB_MODE') or 'offline')
+                os.environ.setdefault('WANDB_MODE', mode)
+                if wb_cfg.get('project'):
+                    os.environ.setdefault('WANDB_PROJECT', str(wb_cfg['project']))
+                if wb_cfg.get('entity'):
+                    os.environ.setdefault('WANDB_ENTITY', str(wb_cfg['entity']))
+
+                self._wandb = wandb
+                self._wandb_run = wandb.init(
+                    project=str(wb_cfg.get('project') or os.environ.get('WANDB_PROJECT') or 'qwen-bench'),
+                    entity=(str(wb_cfg['entity']) if wb_cfg.get('entity') else None),
+                    name=(str(wb_cfg['run_name']) if wb_cfg.get('run_name') else None),
+                    tags=list(wb_cfg.get('tags') or []),
+                    config=self.config,
+                )
+                self.logger.info(f"wandb enabled (mode={mode}).")
+            except Exception as e:
+                self.logger.warning(f"wandb requested but not available: {e}")
+
+    def _track_metrics(self, model_key: str, benchmark_name: str, metrics: Dict[str, Any], step: int) -> None:
+        """Emit scalar metrics to TB/W&B."""
+        if not isinstance(metrics, dict):
+            return
+
+        prefix = f"{model_key}/{benchmark_name}"
+        # TensorBoard
+        if self._tb_writer is not None:
+            for k, v in metrics.items():
+                if isinstance(v, (int, float)):
+                    self._tb_writer.add_scalar(f"{prefix}/{k}", float(v), step)
+
+        # W&B
+        if self._wandb is not None and self._wandb_run is not None:
+            payload = {f"{prefix}/{k}": v for k, v in metrics.items() if isinstance(v, (int, float))}
+            if payload:
+                self._wandb.log(payload, step=step)
         self.logger.info(f"Configuration loaded from: {config_path}")
         self.logger.info(f"Output directory: {self.output_dir}")
         self.logger.info(f"Number of GPUs: {torch.cuda.device_count()}")
@@ -494,6 +565,15 @@ class BenchmarkRunner:
         self.logger.info(f"GPU Memory before {benchmark_name}: {gpu_memory['allocated_mb']:.2f}MB / {gpu_memory['total_mb']:.2f}MB ({gpu_memory['percent_used']:.1f}%)")
         
         results = benchmark.run(model, tokenizer, model_config)
+
+        # Emit metrics to tracking backends (TB/W&B)
+        try:
+            if isinstance(results, dict) and isinstance(results.get('metrics'), dict):
+                model_key = f"{model_config.get('size')}__{model_config.get('variant', 'main')}"
+                step = int(time.time())
+                self._track_metrics(model_key, benchmark_name, results['metrics'], step)
+        except Exception:
+            pass
         
         elapsed_time = time.time() - start_time
         results['elapsed_time'] = elapsed_time
@@ -751,6 +831,19 @@ class BenchmarkRunner:
         
         # Print summary
         self._print_summary()
+
+        # Close tracking runs
+        try:
+            if self._tb_writer is not None:
+                self._tb_writer.flush()
+                self._tb_writer.close()
+        except Exception:
+            pass
+        try:
+            if self._wandb_run is not None:
+                self._wandb_run.finish()
+        except Exception:
+            pass
 
     def _save_quick_charts(self) -> None:
         """Write a couple of quick PNG charts into the run output directory.

@@ -248,6 +248,20 @@ logging:
   log_to_file: true
   log_to_console: true
 
+  # Optional experiment trackers
+  tensorboard:
+    enabled: true
+    log_dir: "logs/tensorboard"
+  wandb:
+    enabled: true
+    # Default to offline so runs don't require an API key by default.
+    # Set WANDB_MODE=online or set mode: "online" + configure auth if desired.
+    mode: "offline"  # offline|online|disabled
+    project: "qwen-bench"
+    entity: null
+    run_name: null
+    tags: []
+
 # Performance tracking
 performance:
   track_memory: true

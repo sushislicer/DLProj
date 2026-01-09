@@ -8,6 +8,14 @@ model_name: "Qwen/Qwen2.5-7B-Instruct"
 output_dir: "outputs"
 log_dir: "logs"
 
+# Optional experiment trackers (GaLore training)
+use_tensorboard: true
+use_wandb: true
+wandb:
+  mode: "offline"  # offline|online|disabled
+  project: "qwen-pipeline"
+  entity: null
+
 # Training Configuration
 seed: 42
 num_epochs: 3
