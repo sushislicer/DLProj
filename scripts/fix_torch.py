@@ -45,6 +45,16 @@ def _nvidia_gpu_name() -> Optional[str]:
         return None
 
 
+def _nvidia_cuda_version() -> Optional[str]:
+    """Return NVIDIA driver-reported CUDA version string (e.g., '12.8')."""
+    try:
+        out = subprocess.check_output(["nvidia-smi"], stderr=subprocess.STDOUT, text=True)
+        m = re.search(r"CUDA Version:\s*([0-9]+\.[0-9]+)", out)
+        return m.group(1) if m else None
+    except Exception:
+        return None
+
+
 def _should_use_nightly(gpu_name: Optional[str]) -> bool:
     # Heuristic: RTX 50xx generally implies Blackwell (SM120).
     if not gpu_name:
@@ -57,11 +67,30 @@ def _pip_install_torch(channel: str, *, force_reinstall: bool = False) -> int:
     # Installing torchvision/torchaudio is not required for text-only benchmarking,
     # and mismatched torchvision wheels commonly break transformers imports.
     pkgs = os.environ.get("TORCH_PACKAGES", "torch").split()
+    # Pick a CUDA wheel index.
+    # Default preference is based on NVIDIA driver-reported CUDA version.
+    # RTX 50xx machines commonly report CUDA 12.8+.
+    cuda_ver = _nvidia_cuda_version()
+    default_stable = "https://download.pytorch.org/whl/cu124"
+    default_nightly = "https://download.pytorch.org/whl/nightly/cu128"
+    if cuda_ver:
+        try:
+            major, minor = cuda_ver.split(".")
+            key = f"cu{int(major):d}{int(minor):d}"
+            if key == "cu128":
+                default_stable = "https://download.pytorch.org/whl/cu128"
+                default_nightly = "https://download.pytorch.org/whl/nightly/cu128"
+            elif key == "cu130":
+                default_stable = "https://download.pytorch.org/whl/cu130"
+                default_nightly = "https://download.pytorch.org/whl/nightly/cu130"
+        except Exception:
+            pass
+
     if channel == "nightly":
-        index_url = os.environ.get("TORCH_NIGHTLY_INDEX_URL", "https://download.pytorch.org/whl/nightly/cu126")
+        index_url = os.environ.get("TORCH_NIGHTLY_INDEX_URL", default_nightly)
         extra = ["--pre"]
     else:
-        index_url = os.environ.get("TORCH_INDEX_URL", "https://download.pytorch.org/whl/cu124")
+        index_url = os.environ.get("TORCH_INDEX_URL", default_stable)
         extra = []
 
     cmd = [sys.executable, "-m", "pip", "install", "-U"] + extra
@@ -135,12 +164,22 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    auto_remediate = str(os.environ.get("AUTO_REMEDIATE_TORCH", "1")).strip().lower() in ("1", "true", "yes")
+
     # If torch already works, just validate.
     if not args.reinstall:
         try:
             import torch  # noqa: F401
 
             rc = _validate_torch()
+            # If GPU arch mismatch and we're allowed to auto-remediate, do it.
+            if rc == 2 and auto_remediate:
+                gpu_name = _nvidia_gpu_name()
+                if _should_use_nightly(gpu_name):
+                    print("[fix_torch] Auto-remediating by reinstalling torch from nightly (RTX 50xx detected)...")
+                    rc2 = _pip_install_torch("nightly", force_reinstall=True)
+                    if rc2 == 0:
+                        rc = _validate_torch()
             sys.exit(rc)
         except Exception:
             pass
@@ -154,6 +193,9 @@ def main() -> None:
 
     if gpu_name:
         print(f"[fix_torch] Detected GPU: {gpu_name}")
+    cuda_ver = _nvidia_cuda_version()
+    if cuda_ver:
+        print(f"[fix_torch] NVIDIA driver reports CUDA Version: {cuda_ver}")
     else:
         print("[fix_torch] No NVIDIA GPU detected via nvidia-smi; installing CPU/stable torch from default index.")
 
