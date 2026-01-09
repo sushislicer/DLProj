@@ -62,7 +62,7 @@ chmod +x scripts/run_fast_benchmark.sh
  # Or customize:
  NUM_GPUS=8 TIME_BUDGET=2 ./scripts/run_fast_benchmark.sh
 
- # Optional: also run baseline variants (native 4-bit quant + 4-bit QLoRA).
+  # Optional: also run baseline variants (native 4-bit quant + 4-bit LoRA / QLoRA-style adapter).
  # Note: this increases runtime because it runs additional model variants.
  RUN_BASELINES=true ./scripts/run_fast_benchmark.sh
 ```
@@ -112,7 +112,7 @@ cd ~/DLProj
    --quantize \
    --time_budget 4
 
- # Optional: include baselines (native 4-bit quant + 4-bit QLoRA)
+  # Optional: include baselines (native 4-bit quant + 4-bit LoRA / QLoRA-style adapter)
  python scripts/run_benchmarks.py \
    --num_gpus 4 \
    --quantize \

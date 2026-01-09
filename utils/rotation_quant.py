@@ -34,6 +34,10 @@ class RotationQuantConfig:
     # Optional: use captured activation vectors to weight the rotation objective
     # toward preserving the actual function on calibration data.
     use_activation_objective: bool = True
+    # Rotation backend selection.
+    # - blockwise_givens: learned rotation via Givens sweeps (slowest, best effort)
+    # - hadamard: fixed fast Hadamard rotation (no learning; very fast)
+    backend: str = "blockwise_givens"
     module_name_substrings: Tuple[str, ...] = (
         "q_proj",
         "k_proj",
@@ -64,6 +68,101 @@ def _symmetric_fake_quant(x: torch.Tensor, bits: int) -> torch.Tensor:
     scale = max_abs / qmax
     q = torch.round(x / scale).clamp(min=-qmax - 1, max=qmax)
     return q * scale
+
+
+_HADAMARD_CACHE: Dict[int, torch.Tensor] = {}
+
+
+def _hadamard_matrix(n: int, *, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+    """Return an n×n Hadamard matrix (normalized, orthogonal).
+
+    Requires n to be a power of 2.
+    """
+    if n <= 0 or (n & (n - 1)) != 0:
+        raise ValueError(f"Hadamard size must be power of 2, got {n}")
+
+    if n not in _HADAMARD_CACHE:
+        # Build on CPU float32 for stability.
+        H = torch.tensor([[1.0]], dtype=torch.float32)
+        while H.shape[0] < n:
+            H = torch.cat([torch.cat([H, H], dim=1), torch.cat([H, -H], dim=1)], dim=0)
+        H = H / (n ** 0.5)
+        _HADAMARD_CACHE[n] = H
+    return _HADAMARD_CACHE[n].to(device=device, dtype=dtype)
+
+
+@torch.no_grad()
+def apply_hadamard_rotation_and_fake_quant(
+    linear: nn.Linear,
+    *,
+    bits: int,
+    block_size: int,
+) -> None:
+    """In-place: apply a blockwise Hadamard rotation over input dimension and fake-quant."""
+    w = linear.weight.data
+    out_features, in_features = w.shape
+    device = w.device
+    # Compute in float32 then cast back.
+    w_fp = w.detach().to(device=device, dtype=torch.float32)
+
+    if block_size <= 0:
+        block_size = in_features
+
+    # If block_size is not power of 2, fall back to identity (no-op) to avoid errors.
+    if (block_size & (block_size - 1)) != 0:
+        block_size = 0
+
+    if block_size and block_size <= in_features:
+        chunks = []
+        for start in range(0, in_features, block_size):
+            end = min(start + block_size, in_features)
+            B = end - start
+            if B != block_size:
+                # Tail block: skip rotation to avoid non-power-of-2 size.
+                chunks.append(w_fp[:, start:end])
+                continue
+            H = _hadamard_matrix(B, device=device, dtype=torch.float32)
+            chunks.append(w_fp[:, start:end] @ H)
+        w_rot = torch.cat(chunks, dim=1)
+    else:
+        w_rot = w_fp
+
+    w_q = _symmetric_fake_quant(w_rot, bits=bits)
+    linear.weight.data = w_q.to(dtype=w.dtype)
+
+
+@torch.no_grad()
+def apply_hadamard_rotations(
+    model: nn.Module,
+    cfg: RotationQuantConfig,
+    logger: Optional[object] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Apply fixed Hadamard rotation + fake quant to a subset of Linear layers."""
+    summary: Dict[str, Dict[str, Any]] = {}
+    num_done = 0
+    for name, linear in _iter_target_linears(model, cfg.module_name_substrings):
+        if num_done >= cfg.max_layers:
+            break
+        if logger:
+            logger.info(f"[SpinQuant-hadamard] applying hadamard rotation for {name} shape={tuple(linear.weight.shape)}")
+
+        apply_hadamard_rotation_and_fake_quant(
+            linear,
+            bits=int(cfg.bits),
+            block_size=int(cfg.block_size),
+        )
+        summary[name] = {
+            "out_features": int(linear.weight.shape[0]),
+            "in_features": int(linear.weight.shape[1]),
+            "block_size": int(cfg.block_size),
+            "bits": int(cfg.bits),
+            "backend": "hadamard",
+        }
+        num_done += 1
+
+    if logger:
+        logger.info(f"[SpinQuant-hadamard] applied hadamard rotation+fake-quant to {num_done} Linear layers")
+    return summary
 
 
 class BlockGivensRotation(nn.Module):

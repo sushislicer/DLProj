@@ -21,8 +21,11 @@ import yaml
 import torch
 import numpy as np
 from tqdm import tqdm
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-from accelerate import infer_auto_device_map, dispatch_model
+
+# NOTE: Do not import `transformers` at module import time.
+# If the user's environment has an incompatible torch/transformers combination
+# (common on fresh GPU servers), importing transformers can fail before we can
+# emit a helpful error message. We import lazily inside helper functions.
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -30,6 +33,31 @@ from utils.helpers import setup_logging, ensure_dir, format_time
 from utils.memory_tracker import MemoryTracker
 from utils.flash_attention import pick_attn_implementation
 from utils.hf_download import resolve_path_or_hf_repo, is_probably_hf_repo_id
+
+
+def _import_transformers(logger: logging.Logger):
+    """Lazy import transformers.
+
+    Raises an ImportError with actionable remediation hints when a common
+    torch/transformers mismatch occurs.
+    """
+    try:
+        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
+        return AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+    except Exception as e:
+        # Common mismatch: newer transformers expects newer torch pytree API.
+        msg = str(e)
+        if "torch.utils._pytree" in msg and "register_pytree_node" in msg:
+            raise ImportError(
+                "Failed to import transformers due to a torch/transformers version mismatch.\n"
+                "Your torch is too old for the installed transformers.\n\n"
+                "Fix:\n"
+                "- Install/upgrade a GPU-compatible torch wheel using `python3 scripts/fix_torch.py --reinstall --channel nightly` (RTX 50xx)\n"
+                "  or reinstall a stable CUDA torch for your driver, then re-run `pip install -r requirements.txt`.\n"
+                f"Original error: {msg}"
+            )
+        raise
 
 
 class BenchmarkRunner:
@@ -185,6 +213,8 @@ class BenchmarkRunner:
     
     def _setup_quantization(self) -> Optional[BitsAndBytesConfig]:
         """Setup 4-bit quantization configuration."""
+        # Lazy import (see `_import_transformers`).
+        _, _, BitsAndBytesConfig = _import_transformers(self.logger)
         if not self.config['gpu']['quantization']['enabled']:
             return None
         
@@ -299,6 +329,9 @@ class BenchmarkRunner:
         else:
             torch_dtype = torch.float32
         
+        # Lazy import transformers (avoid hard failure at module import time).
+        AutoModelForCausalLM, AutoTokenizer, _ = _import_transformers(self.logger)
+
         # Load tokenizer
         self.logger.info("Loading tokenizer...")
         tokenizer = AutoTokenizer.from_pretrained(

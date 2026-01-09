@@ -109,6 +109,10 @@ class QuantizationPipeline:
             '--output_dir', self.config['output_dir'],
             '--bits', str(self.config['spinquant']['bits'])
         ]
+
+        # Optional fast path: skip rotation learning.
+        if bool(self.config['spinquant'].get('skip_rotations', False)):
+            cmd.append('--skip_rotations')
         
         if self.config['spinquant'].get('double_quant', False):
             cmd.append('--double_quant')
@@ -343,6 +347,8 @@ def create_default_config():
             'lr': 0.05,
             'num_sweeps': 2,
             'max_layers': 8,
+            # Rotation learning is expensive; default to skipping for bounded runtime.
+            'skip_rotations': True,
             'use_bnb_quantization': True,
             'use_activation_objective': True,
             'calibration_vectors_per_layer': 256,

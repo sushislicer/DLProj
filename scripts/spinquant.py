@@ -14,7 +14,7 @@ from utils.helpers import (
     ensure_dir, set_seed, format_time
 )
 from utils.memory_tracker import MemoryTracker
-from utils.rotation_quant import RotationQuantConfig, learn_and_apply_rotations
+from utils.rotation_quant import RotationQuantConfig, learn_and_apply_rotations, apply_hadamard_rotations
 import time
 
 
@@ -215,41 +215,56 @@ class SpinQuantizer:
         calibration_inputs = self.prepare_calibration_data()
         self.memory_tracker.log_memory("SpinQuant", "Calibration data prepared")
 
-        if backend != 'blockwise_givens':
+        if backend not in ('blockwise_givens', 'hadamard'):
             raise ValueError(
-                f"Unsupported backend: {backend}. Supported: blockwise_givens"
+                f"Unsupported backend: {backend}. Supported: blockwise_givens, hadamard"
             )
 
-        rq_cfg = RotationQuantConfig(
-            bits=int(spinquant_config.get('bits', 8)),
-            block_size=int(spinquant_config.get('block_size', 64)),
-            num_steps=int(spinquant_config.get('num_steps', 50)),
-            lr=float(spinquant_config.get('lr', 5e-2)),
-            num_sweeps=int(spinquant_config.get('num_sweeps', 2)),
-            max_layers=int(spinquant_config.get('max_layers', 16)),
-            use_activation_objective=bool(spinquant_config.get('use_activation_objective', True)),
-        )
-
-        activation_samples = None
-        if rq_cfg.use_activation_objective:
-            prompts = [
-                "Explain why 13 is a prime number.",
-                "Solve: If x+3=10, what is x?",
-                "Write a short Python function to add two numbers.",
-            ]
-            activation_samples = self.capture_linear_inputs(
-                prompts,
-                max_vectors_per_layer=int(spinquant_config.get('calibration_vectors_per_layer', 512)),
+        # Rotation learning can be expensive for large models.
+        # Allow skipping it entirely and falling back to plain bnb quantization.
+        skip_rotations = bool(spinquant_config.get('skip_rotations', False))
+        if skip_rotations:
+            self.logger.info("[SpinQuant-lite] skip_rotations=true; skipping rotation learning and using standard bitsandbytes quantization")
+            self.layer_summary = {}
+        else:
+            rq_cfg = RotationQuantConfig(
+                bits=int(spinquant_config.get('bits', 8)),
+                block_size=int(spinquant_config.get('block_size', 64)),
+                num_steps=int(spinquant_config.get('num_steps', 50)),
+                lr=float(spinquant_config.get('lr', 5e-2)),
+                num_sweeps=int(spinquant_config.get('num_sweeps', 2)),
+                max_layers=int(spinquant_config.get('max_layers', 16)),
+                use_activation_objective=bool(spinquant_config.get('use_activation_objective', True)),
+                backend=str(spinquant_config.get('backend', 'blockwise_givens')),
             )
 
-        layer_summary = learn_and_apply_rotations(
-            self.model,
-            rq_cfg,
-            logger=self.logger,
-            activation_samples=activation_samples,
-        )
-        self.logger.info(f"SpinQuant-lite updated layers: {len(layer_summary)}")
-        self.layer_summary = layer_summary
+            if rq_cfg.backend == 'hadamard':
+                layer_summary = apply_hadamard_rotations(
+                    self.model,
+                    rq_cfg,
+                    logger=self.logger,
+                )
+            else:
+                activation_samples = None
+                if rq_cfg.use_activation_objective:
+                    prompts = [
+                        "Explain why 13 is a prime number.",
+                        "Solve: If x+3=10, what is x?",
+                        "Write a short Python function to add two numbers.",
+                    ]
+                    activation_samples = self.capture_linear_inputs(
+                        prompts,
+                        max_vectors_per_layer=int(spinquant_config.get('calibration_vectors_per_layer', 512)),
+                    )
+
+                layer_summary = learn_and_apply_rotations(
+                    self.model,
+                    rq_cfg,
+                    logger=self.logger,
+                    activation_samples=activation_samples,
+                )
+            self.logger.info(f"SpinQuant-lite updated layers: {len(layer_summary)}")
+            self.layer_summary = layer_summary
 
         # Optional: convert to *real* bitsandbytes quantized modules for lower VRAM.
         # This more closely matches the benchmarking runner's 4-bit weight memory.
@@ -432,7 +447,7 @@ def main():
         '--backend',
         type=str,
         default='blockwise_givens',
-        choices=['blockwise_givens'],
+        choices=['blockwise_givens', 'hadamard'],
         help='SpinQuant backend implementation'
     )
     parser.add_argument('--block_size', type=int, default=64, help='Rotation block size')
@@ -462,6 +477,12 @@ def main():
         action='store_true',
         help='After learning rotations, reload the model with bitsandbytes quantized modules (recommended for VRAM)'
     )
+
+    parser.add_argument(
+        '--skip_rotations',
+        action='store_true',
+        help='Skip rotation learning and directly quantize with bitsandbytes (fast path)'
+    )
     
     args = parser.parse_args()
     
@@ -490,6 +511,7 @@ def main():
             'use_activation_objective': not bool(args.no_activation_objective),
             'calibration_vectors_per_layer': int(args.calibration_vectors_per_layer),
             'keep_fp16_modules': [s.strip() for s in args.keep_fp16_modules.split(',') if s.strip()],
+            'skip_rotations': bool(args.skip_rotations),
         }
     }
     

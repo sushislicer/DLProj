@@ -4,7 +4,10 @@
 # (e.g. RTX 5090 = SM120 may require a newer/nightly wheel). Use
 # [`scripts/fix_torch.py`](scripts/fix_torch.py:1) or [`setup.sh`](setup.sh:1)
 # before running `pip install -r requirements.txt`.
-transformers>=4.35.0
+# Pin transformers to a known-stable range.
+# Newer transformers releases may require newer PyTorch APIs (e.g., pytree),
+# which can break environments with older torch wheels.
+transformers>=4.41.0,<4.46.0
 accelerate>=0.24.0
 peft>=0.7.0
 bitsandbytes>=0.41.0

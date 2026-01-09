@@ -149,13 +149,13 @@ cd ~/DLProj
 python scripts/run_benchmarks.py
 ```
 
-### Baseline comparison (native 4-bit quant + 4-bit QLoRA)
+### Baseline comparison (native 4-bit quant + 4-bit LoRA / QLoRA-style adapter)
 
 The repo can optionally run additional **baseline variants** for each selected
 model size:
 
 - `baseline_4bit`: base model in 4-bit (no adapters)
-- `baseline_4bit_qlora`: base model in 4-bit + a PEFT adapter (`adapter_path`)
+- `baseline_4bit_lora`: base model in 4-bit + a PEFT adapter (`adapter_path`)
 
 This is **opt-in** because it increases runtime.
 
@@ -164,8 +164,8 @@ cd ~/DLProj
 python scripts/run_benchmarks.py --run_baselines
 ```
 
-For the QLoRA baseline, ensure [`configs/benchmark_config.yaml`](../configs/benchmark_config.yaml:1)
-sets `baselines.quantization_4bit_lora.adapter_path` to a valid adapter folder.
+For the LoRA/QLoRA baseline, ensure [`configs/benchmark_config.yaml`](../configs/benchmark_config.yaml:1)
+sets `baselines.quantization_4bit_lora.adapter_path` to a valid adapter folder (local path) or a HuggingFace Hub repo id.
 
 ### Run Specific Model Sizes
 

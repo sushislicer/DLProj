@@ -51,6 +51,17 @@ def main() -> None:
                 p = torch.cuda.get_device_properties(i)
                 print(f"  GPU {i}: {p.name} total_mem={p.total_memory/1024**3:.1f}GB cc={p.major}.{p.minor}")
 
+        # Common transformers compatibility check.
+        try:
+            import torch.utils._pytree as _pytree
+
+            has_reg = hasattr(_pytree, "register_pytree_node")
+            print(f"torch.utils._pytree.register_pytree_node: {has_reg}")
+            if not has_reg:
+                print("NOTE: Some transformers versions require a newer torch pytree API.")
+        except Exception as e:
+            print(f"torch.utils._pytree check: <error> ({e})")
+
     if args.install_flash_attn:
         try:
             from utils.helpers import setup_logging
