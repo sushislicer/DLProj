@@ -256,9 +256,9 @@ logging:
     enabled: true
     # Default to offline so runs don't require an API key by default.
     # Set WANDB_MODE=online or set mode: "online" + configure auth if desired.
-    mode: "offline"  # offline|online|disabled
-    project: "qwen-bench"
-    entity: null
+    mode: "online"  # offline|online|disabled
+    project: "DLProj"
+    entity: "yangchen0305"
     run_name: null
     tags: []
 

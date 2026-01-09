@@ -12,13 +12,13 @@ log_dir: "logs"
 use_tensorboard: true
 use_wandb: true
 wandb:
-  mode: "offline"  # offline|online|disabled
-  project: "qwen-pipeline"
-  entity: null
+  mode: "online"  # offline|online|disabled
+  project: "DLProj"
+  entity: "yangchen0305"
 
-# Training Configuration
+# Training Configuration (bounded defaults)
 seed: 42
-num_epochs: 1  # keep pipeline training short by default
+num_epochs: 1
 batch_size: 4
 gradient_accumulation_steps: 2
 warmup_steps: 100
@@ -27,17 +27,12 @@ save_steps: 500
 save_total_limit: 3
 
 # Optional cap on total optimizer steps (overrides epochs if set).
-# This is the main knob to keep GaLore training bounded.
 max_steps: 800
 
 # Dataset Configuration
-# NOTE: This dataset is used for *adapter training* in the pipeline (PiSSA/SpinQuant/GaLore).
-# It is NOT the same as the benchmarking datasets (AIME/MATH/GPQA/LiveCodeBench/SWE-Bench),
-# which are configured separately in [`configs/benchmark_config.yaml`](configs/benchmark_config.yaml:1)
-# and run via [`scripts/run_benchmarks.py`](scripts/run_benchmarks.py:1).
+# NOTE: This dataset is used for *adapter training* in the pipeline.
 dataset: "c4"
 dataset_split: "train"
-max_samples: 10000
 max_samples: 2000
 max_length: 256
 
@@ -83,7 +78,7 @@ galore:
   weight_decay: 0.01
   update_proj_gap: 200
   scale: 0.25
-  proj_type: "std"  # Options: "std", "reverse_std", "full"
+  proj_type: "std"
 
 # Optional: post-quant adapter distillation
 distill:
@@ -98,25 +93,3 @@ projection:
   update_gap: 200
   drift_threshold: 0.35
 
-  # Optional schedules (step-based). If provided, these override `rank`/`update_gap`
-  # as training progresses.
-  # Example:
-  # rank_schedule:
-  #   - {step: 0, value: 32}
-  #   - {step: 200, value: 64}
-  # update_gap_schedule:
-  #   - {step: 0, value: 400}
-  #   - {step: 1000, value: 200}
-
-  # Optional scheduler (alternative to step lists): cosine decay for update_gap.
-  # This yields infrequent projection updates early (large gap), more frequent
-  # updates mid-run, and the most frequent updates late (small gap).
-  #
-  # Enable by setting:
-  # update_gap_schedule_mode: "cosine"
-  # update_gap_cosine:
-  #   max_gap: 400
-  #   min_gap: 50
-  #
-  # Notes:
-  # - If `update_gap_schedule` is set, it takes precedence over cosine.

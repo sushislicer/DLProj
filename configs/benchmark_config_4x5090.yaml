@@ -167,6 +167,17 @@ logging:
   log_to_file: true
   log_to_console: true
 
+  tensorboard:
+    enabled: true
+    log_dir: "logs/tensorboard"
+  wandb:
+    enabled: true
+    mode: "online"
+    project: "DLProj"
+    entity: "yangchen0305"
+    run_name: null
+    tags: ["4x5090"]
+
 advanced:
   use_flash_attention: true
   use_cache: true
@@ -183,6 +194,11 @@ execution:
   model_priority: ["0.5B", "7B", "14B", "72B"]
 
 baselines:
+  pipeline_4bit:
+    enabled: true
+    name: "Pipeline (Ours) 4-bit"
+    description: "Base model in 4-bit + our pipeline adapters (if provided)"
+    adapter_path: null
   quantization_4bit:
     enabled: true
     name: "4-bit Quantization (No Adapters)"
@@ -190,14 +206,13 @@ baselines:
     use_adapters: false
   quantization_4bit_lora:
     enabled: true
-    name: "4-bit QLoRA (Adapters)"
+    name: "4-bit LoRA (Adapters Baseline)"
     quantization: "4bit"
     use_adapters: true
-    adapter_path: "outputs/trained_adapters"
+    adapter_path: "outputs/lora_adapters"  # or "org/repo[@rev]"
 
 debug:
   enabled: false
   use_debug_samples: true
   compare_baselines: true
   debug_sample_size: 5
-
