@@ -99,6 +99,8 @@ class BlockGivensRotation(nn.Module):
 
         device = w.device
         dtype = w.dtype
+        # NOTE: We avoid in-place ops on views into `w` because they can break
+        # autograd during rotation optimization (version counter mismatch).
         w_rot = w
 
         for b in range(self.angles.shape[0]):
@@ -108,7 +110,8 @@ class BlockGivensRotation(nn.Module):
             if B <= 1:
                 continue
 
-            block = w_rot[:, start:end]
+            # Work on a cloned block to avoid view/in-place autograd issues.
+            block = w_rot[:, start:end].clone()
             # Apply sweeps of adjacent rotations.
             for s in range(self.num_sweeps):
                 thetas = self.angles[b, s, : B - 1].to(device=device, dtype=dtype)
@@ -118,8 +121,10 @@ class BlockGivensRotation(nn.Module):
                 for i in range(B - 1):
                     c = cos_t[i]
                     si = sin_t[i]
-                    col_i = block[:, i]
-                    col_j = block[:, i + 1]
+                    # Clone the source columns before assignment to avoid
+                    # reading from tensors that will be modified in-place.
+                    col_i = block[:, i].clone()
+                    col_j = block[:, i + 1].clone()
                     block[:, i] = c * col_i - si * col_j
                     block[:, i + 1] = si * col_i + c * col_j
 
@@ -142,6 +147,7 @@ class BlockGivensRotation(nn.Module):
 
         device = w.device
         dtype = w.dtype
+        # Same autograd safety note as `forward_rotate`.
         w_inv = w
 
         for b in range(self.angles.shape[0]):
@@ -151,7 +157,7 @@ class BlockGivensRotation(nn.Module):
             if B <= 1:
                 continue
 
-            block = w_inv[:, start:end]
+            block = w_inv[:, start:end].clone()
             for s in reversed(range(self.num_sweeps)):
                 thetas = (-self.angles[b, s, : B - 1]).to(device=device, dtype=dtype)
                 cos_t = torch.cos(thetas)
@@ -159,8 +165,8 @@ class BlockGivensRotation(nn.Module):
                 for i in reversed(range(B - 1)):
                     c = cos_t[i]
                     si = sin_t[i]
-                    col_i = block[:, i]
-                    col_j = block[:, i + 1]
+                    col_i = block[:, i].clone()
+                    col_j = block[:, i + 1].clone()
                     block[:, i] = c * col_i - si * col_j
                     block[:, i + 1] = si * col_i + c * col_j
 
