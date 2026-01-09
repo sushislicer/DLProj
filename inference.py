@@ -5,10 +5,15 @@ Inference script for the quantized Qwen2.5 model with trained adapters.
 import os
 import argparse
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from peft import PeftModel
 import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from utils.flash_attention import patch_broken_flash_attn
+
+# Patch around broken/incompatible flash-attn wheels (we don't require FA2 here).
+patch_broken_flash_attn(logger=None)
+
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from peft import PeftModel
 from utils.helpers import get_device
 
 
@@ -34,7 +39,8 @@ def load_model(quantized_model_path: str, adapter_path: str, device: str = None)
         quantized_model_path,
         torch_dtype=torch.float16,
         device_map="auto",
-        trust_remote_code=True
+        trust_remote_code=True,
+        attn_implementation="sdpa",
     )
     
     print(f"Loading trained adapters from {adapter_path}...")

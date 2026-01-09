@@ -3,13 +3,20 @@ PiSSA (Principal Singular values and Singular Vectors Adaptation) adapter extrac
 Extracts adapters and residuals from the Qwen2.5 model.
 """
 
+from __future__ import annotations
+
 import os
-import torch
 import argparse
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from peft import LoraConfig, get_peft_model, TaskType
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.flash_attention import patch_broken_flash_attn
+
+# Some environments have a broken `flash-attn` wheel that prevents Transformers
+# model code from importing. Patch it out early (we don't require FA2 here).
+patch_broken_flash_attn(logger=None)
+
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
 from utils.helpers import (
     setup_logging, get_device, print_model_size,
     ensure_dir, set_seed, count_parameters
@@ -49,7 +56,9 @@ class PiSSAExtractor:
             config['model_name'],
             torch_dtype=torch.float16,
             device_map="auto",
-            trust_remote_code=True
+            trust_remote_code=True,
+            # Use PyTorch SDPA attention (portable) to avoid FlashAttention2 issues.
+            attn_implementation="sdpa",
         )
         
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -79,6 +88,9 @@ class PiSSAExtractor:
         self.memory_tracker.log_memory("PiSSA", "Applying PiSSA...")
         
         # Configure LoRA with PiSSA
+        # Import PEFT lazily so the early flash-attn patch is applied first.
+        from peft import LoraConfig, get_peft_model, TaskType
+
         lora_config = LoraConfig(
             task_type=TaskType.CAUSAL_LM,
             r=pissa_config['rank'],

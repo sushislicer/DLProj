@@ -3,12 +3,19 @@ SpinQuant quantization script for the residual base model.
 Quantizes and freezes the residual model using SpinQuant method.
 """
 
+from __future__ import annotations
+
 import os
 import torch
 import argparse
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.flash_attention import patch_broken_flash_attn
+
+# Patch around broken/incompatible flash-attn wheels (we don't require FA2 here).
+patch_broken_flash_attn(logger=None)
+
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from utils.helpers import (
     setup_logging, get_device, print_model_size,
     ensure_dir, set_seed, format_time
@@ -51,7 +58,8 @@ class SpinQuantizer:
             model_path,
             torch_dtype=torch.float16,
             device_map="auto",
-            trust_remote_code=True
+            trust_remote_code=True,
+            attn_implementation="sdpa",
         )
         
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -315,6 +323,7 @@ class SpinQuantizer:
                 trust_remote_code=True,
                 quantization_config=bnb_cfg,
                 low_cpu_mem_usage=True,
+                attn_implementation="sdpa",
             )
 
             # Restore selected fp16 modules if requested.

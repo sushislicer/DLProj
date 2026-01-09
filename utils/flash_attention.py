@@ -13,15 +13,88 @@ import os
 import sys
 import subprocess
 from typing import Optional
+import types
 
 
 def _try_import_flash_attn() -> tuple[bool, str]:
     try:
         import flash_attn  # noqa: F401
 
+        # If we previously injected a stub, treat it as unavailable.
+        ver = str(getattr(flash_attn, "__version__", ""))
+        if ver.endswith("-stub") or ver == "0.0.0-stub":
+            return False, "stubbed"
+
         return True, "ok"
     except Exception as e:
         return False, str(e)
+
+
+def patch_broken_flash_attn(*, logger=None) -> bool:
+    """Patch around a broken `flash_attn` install.
+
+    Some environments end up with an incompatible `flash-attn` wheel (wrong torch/CUDA),
+    which makes *importing Transformers model code* fail because certain model
+    implementations unconditionally import `flash_attn.*` when it is present.
+
+    This function detects a failing `import flash_attn` and injects a minimal
+    stub package into `sys.modules` so that Transformers can import, while we
+    continue to run with standard attention (no FlashAttention kernels).
+
+    Returns:
+        True if a stub was installed (i.e., we patched), else False.
+    """
+    ok, reason = _try_import_flash_attn()
+    if ok:
+        return False
+
+    # Only patch for "binary present but broken" situations.
+    reason_l = (reason or "").lower()
+    triggers = (
+        "undefined symbol",
+        "cannot open shared object file",
+        "version `glibc",
+        "flash_attn_2_cuda",
+    )
+    if not any(t in reason_l for t in triggers):
+        return False
+
+    if logger is not None:
+        try:
+            logger.warning(f"Detected broken flash_attn install ({reason}); stubbing it out so Transformers can import.")
+        except Exception:
+            pass
+
+    # Remove any partially-imported modules.
+    for k in list(sys.modules.keys()):
+        if k == 'flash_attn' or k.startswith('flash_attn.'):
+            sys.modules.pop(k, None)
+
+    def _not_available(*args, **kwargs):
+        raise RuntimeError(
+            "flash-attn is installed but broken/incompatible in this environment. "
+            "Uninstall it (`pip uninstall flash-attn`) or reinstall a compatible build."
+        )
+
+    # Create a stub package and common submodules referenced by Transformers.
+    pkg = types.ModuleType('flash_attn')
+    pkg.__path__ = []  # mark as package
+    pkg.__version__ = '0.0.0-stub'
+
+    bert_padding = types.ModuleType('flash_attn.bert_padding')
+    bert_padding.index_first_axis = _not_available
+    bert_padding.pad_input = _not_available
+    bert_padding.unpad_input = _not_available
+
+    iface = types.ModuleType('flash_attn.flash_attn_interface')
+    iface.flash_attn_func = _not_available
+    iface.flash_attn_varlen_func = _not_available
+    iface.flash_attn_with_kvcache = _not_available
+
+    sys.modules['flash_attn'] = pkg
+    sys.modules['flash_attn.bert_padding'] = bert_padding
+    sys.modules['flash_attn.flash_attn_interface'] = iface
+    return True
 
 
 def _flash_attn_supported_by_gpu() -> tuple[bool, str]:
@@ -74,6 +147,10 @@ def ensure_flash_attn2(
     ok, reason = _try_import_flash_attn()
     if ok:
         return True
+
+    if reason == "stubbed":
+        logger.info("flash_attn is stubbed out due to an incompatible/broken install; not using FlashAttention2")
+        return False
 
     if not auto_install:
         logger.info(f"flash_attn not available ({reason}); auto-install disabled")

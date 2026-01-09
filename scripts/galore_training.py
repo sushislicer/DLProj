@@ -3,9 +3,19 @@ GaLore (Gradient Low-Rank Projection) training script for non-quantized adapters
 Trains the PiSSA-extracted adapters using GaLore optimizer.
 """
 
+from __future__ import annotations
+
 import os
 import torch
 import argparse
+import sys
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.flash_attention import patch_broken_flash_attn
+
+# Patch around broken/incompatible flash-attn wheels (we don't require FA2 here).
+patch_broken_flash_attn(logger=None)
+
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer
 from peft import PeftModel
 try:
@@ -17,8 +27,7 @@ except Exception:  # pragma: no cover
     GaLoreConfig = None  # type: ignore
 from datasets import load_dataset
 import torch.nn.functional as F
-import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ 
 from utils.helpers import (
     setup_logging, get_device, print_model_size,
     ensure_dir, set_seed, format_time
@@ -60,7 +69,8 @@ class GaLoreTrainer:
             quantized_model_path,
             torch_dtype=torch.float16,
             device_map="auto",
-            trust_remote_code=True
+            trust_remote_code=True,
+            attn_implementation="sdpa",
         )
         
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -97,6 +107,7 @@ class GaLoreTrainer:
                     torch_dtype=torch.float16,
                     device_map="auto",
                     trust_remote_code=True,
+                    attn_implementation="sdpa",
                 )
                 self.teacher_model = PeftModel.from_pretrained(
                     teacher_base,

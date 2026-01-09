@@ -33,7 +33,7 @@ from tqdm import tqdm
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.helpers import setup_logging, ensure_dir, format_time
 from utils.memory_tracker import MemoryTracker
-from utils.flash_attention import pick_attn_implementation
+from utils.flash_attention import pick_attn_implementation, patch_broken_flash_attn
 from utils.hf_download import resolve_path_or_hf_repo, is_probably_hf_repo_id
 
 
@@ -44,6 +44,9 @@ def _import_transformers(logger: logging.Logger):
     torch/transformers mismatch occurs.
     """
     try:
+        # If `flash-attn` is installed but broken/incompatible, Transformers model
+        # code can fail to import. Stub it out so we can continue with default attention.
+        patch_broken_flash_attn(logger=logger)
         from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
         return AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
