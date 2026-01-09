@@ -176,14 +176,49 @@ class GaLoreTrainer:
                 self.logger.warning("Distillation enabled but distill.teacher_model_path not provided; disabling distillation")
                 distill_cfg['enabled'] = False
 
-        # CRITICAL: Freeze the base model (quantized model) - only train adapters
-        self.logger.info("Freezing base model parameters (quantized model)...")
-        for param in self.base_model.parameters():
-            param.requires_grad = False
-        
-        # Verify only adapter parameters are trainable
+        # IMPORTANT:
+        # Do NOT blanket-freeze `self.base_model.parameters()` here.
+        # PEFT injects adapter parameters into the base model module tree, so
+        # freezing the base model after injection can accidentally freeze the
+        # adapter params too (leading to an empty optimizer parameter list).
+
+        # Best-effort: ensure adapter layers are enabled.
+        try:
+            if hasattr(self.model, 'enable_adapter_layers'):
+                self.model.enable_adapter_layers()
+        except Exception:
+            pass
+
+        def _force_only_adapter_trainable(m: torch.nn.Module) -> int:
+            """Safety valve: train adapters only.
+
+            If PEFT didn't correctly mark trainable params, fall back to a name
+            heuristic (LoRA/PiSSA params typically contain 'lora' or 'pissa').
+            """
+            for p in m.parameters():
+                p.requires_grad = False
+            num = 0
+            for n, p in m.named_parameters():
+                nl = n.lower()
+                if ('lora' in nl) or ('pissa' in nl):
+                    p.requires_grad = True
+                    num += p.numel()
+            return int(num)
+
+        # Verify trainability and repair if needed.
         trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         total_params = sum(p.numel() for p in self.model.parameters())
+        if trainable_params == 0:
+            repaired = _force_only_adapter_trainable(self.model)
+            trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+            if trainable_params == 0:
+                raise RuntimeError(
+                    "No trainable adapter parameters found after loading PiSSA adapters. "
+                    "This usually indicates the adapter type wasn't recognized for training or everything was frozen. "
+                    "Try updating `peft`, or verify the adapter directory is a valid trainable PEFT adapter."
+                )
+            self.logger.warning(f"Recovered trainable adapter params via heuristic: {repaired:,} params")
+
         self.logger.info(f"Trainable parameters: {trainable_params:,} / {total_params:,} ({100*trainable_params/total_params:.2f}%)")
         
         self.logger.info("Model with adapters loaded successfully")
@@ -255,6 +290,12 @@ class GaLoreTrainer:
 
         # Identify trainable parameters (only adapter parameters)
         trainable_params = [p for p in model.parameters() if p.requires_grad]
+        if not trainable_params:
+            raise RuntimeError(
+                "No trainable parameters found when creating optimizer. "
+                "This indicates adapters were not marked trainable. "
+                "Check the PiSSA/PEFT adapter files and ensure the training stage didn't freeze everything."
+            )
 
         # Best-effort GaLore support. If the installed galore_torch package does
         # not expose the expected API, fall back to standard AdamW.
