@@ -8,6 +8,8 @@ Features:
 - Optimized execution times for larger models (14B, 32B, 72B)
 """
 
+from __future__ import annotations
+
 import os
 import sys
 import argparse
@@ -164,10 +166,7 @@ class BenchmarkRunner:
             payload = {f"{prefix}/{k}": v for k, v in metrics.items() if isinstance(v, (int, float))}
             if payload:
                 self._wandb.log(payload, step=step)
-        self.logger.info(f"Configuration loaded from: {config_path}")
-        self.logger.info(f"Output directory: {self.output_dir}")
-        self.logger.info(f"Number of GPUs: {torch.cuda.device_count()}")
-        self.logger.info("=" * 80)
+
     
     def _load_config(self, config_path: str) -> Dict:
         """Load configuration from YAML file."""
@@ -1074,6 +1073,24 @@ def main():
     )
 
     parser.add_argument(
+        '--run_pipeline',
+        action='store_true',
+        help='Run the pipeline first to produce `trained_adapters` (via scripts/run_pipeline_multi.py) before benchmarking'
+    )
+    parser.add_argument(
+        '--pipeline_config',
+        type=str,
+        default='configs/pipeline_config.yaml',
+        help='Pipeline config for --run_pipeline'
+    )
+    parser.add_argument(
+        '--pipeline_output_root',
+        type=str,
+        default='outputs/pipeline',
+        help='Output root for --run_pipeline (per-size subdirs are created)'
+    )
+
+    parser.add_argument(
         '--no_flash_attn',
         action='store_true',
         help='Force-disable FlashAttention2 usage and auto-install (use standard attention instead)'
@@ -1136,6 +1153,44 @@ def main():
         runner.config.setdefault('gpu', {}).setdefault('quantization', {})
         runner.config['gpu']['quantization']['use_flash_attention'] = False
         logger.info('FlashAttention2 disabled for this run')
+
+    # Optional: run pipeline first to materialize adapters, then point pipeline_4bit at them.
+    if args.run_pipeline:
+        import subprocess
+
+        cmd = [
+            sys.executable,
+            'scripts/run_pipeline_multi.py',
+            '--pipeline_config',
+            args.pipeline_config,
+            '--benchmark_config',
+            args.config,
+            '--output_root',
+            args.pipeline_output_root,
+        ]
+        if args.model_sizes:
+            cmd.extend(['--sizes', *args.model_sizes])
+
+        logger.info('Running pipeline before benchmarking (this can take a while)...')
+        logger.info(' '.join(cmd))
+        subprocess.run(cmd, check=True)
+
+        # Fill baselines.pipeline_4bit.adapter_path mapping so `--run_baselines` can
+        # correctly evaluate pipeline_4bit with the freshly trained adapters.
+        runner.config.setdefault('baselines', {})
+        runner.config['baselines'].setdefault('pipeline_4bit', {})
+        p = runner.config['baselines']['pipeline_4bit']
+        ap = p.get('adapter_path')
+        mapping = {}
+        if isinstance(ap, dict):
+            mapping.update(ap)
+        elif isinstance(ap, str) and ap.strip():
+            mapping['default'] = ap.strip()
+
+        sizes = list(args.model_sizes) if args.model_sizes else [str(m.get('size')) for m in runner.config.get('models', [])]
+        for sz in sizes:
+            mapping[str(sz)] = os.path.join(args.pipeline_output_root, str(sz), 'trained_adapters')
+        p['adapter_path'] = mapping
 
     # Run benchmarks
     runner.run_all_models(model_sizes=args.model_sizes)

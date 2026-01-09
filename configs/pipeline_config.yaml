@@ -62,7 +62,6 @@ spinquant:
   quant_type: "nf4"  # Options: "nf4", "fp4"
   group_size: 128
   symmetric: false
-  backend: "blockwise_givens"
   block_size: 64
   num_steps: 5  # (unused for hadamard)
   lr: 0.05
