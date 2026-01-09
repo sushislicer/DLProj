@@ -14,7 +14,7 @@ is a practical engineering backend for this repo.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
 import torch
 import torch.nn as nn
@@ -232,12 +232,12 @@ def learn_and_apply_rotations(
     cfg: RotationQuantConfig,
     logger: Optional[object] = None,
     activation_samples: Optional[Dict[str, torch.Tensor]] = None,
-) -> Dict[str, Dict[str, int]]:
+) -> Dict[str, Dict[str, Any]]:
     """Learn rotations for a subset of Linear layers, then apply rotation+fake quant.
 
     Returns a small summary dict for logging/reporting.
     """
-    summary: Dict[str, Dict[str, int]] = {}
+    summary: Dict[str, Dict[str, Any]] = {}
     num_done = 0
 
     for name, linear in _iter_target_linears(model, cfg.module_name_substrings):
@@ -253,7 +253,18 @@ def learn_and_apply_rotations(
         if activation_samples is not None:
             x = activation_samples.get(name)
 
+        # Snapshot original weight for reporting.
+        w_fp = w.detach().to(dtype=torch.float32)
+
         rot = optimize_blockwise_rotation_for_weight(w, cfg, device=w.device, x_samples=x)
+
+        # Compute quantization reconstruction error in rotated space.
+        with torch.no_grad():
+            w_rot = rot.forward_rotate(w_fp)
+            w_q = _symmetric_fake_quant(w_rot, bits=cfg.bits)
+            mse = torch.mean((w_rot - w_q) ** 2).item()
+            max_abs = float(w_rot.abs().max().item())
+
         apply_rotation_and_fake_quant(linear, rot, bits=cfg.bits)
 
         summary[name] = {
@@ -262,6 +273,9 @@ def learn_and_apply_rotations(
             "block_size": int(cfg.block_size),
             "num_sweeps": int(cfg.num_sweeps),
             "num_steps": int(cfg.num_steps),
+            "bits": int(cfg.bits),
+            "rotated_quant_mse": float(mse),
+            "rotated_max_abs": float(max_abs),
         }
         num_done += 1
 

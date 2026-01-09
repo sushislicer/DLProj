@@ -268,7 +268,19 @@ class GaLoreTrainer:
             - Update early if drift exceeds `drift_threshold`.
             """
 
-            def __init__(self, enabled: bool, rank: int, update_gap: int, drift_threshold: float, logger):
+            def __init__(
+                self,
+                enabled: bool,
+                rank: int,
+                update_gap: int,
+                drift_threshold: float,
+                logger,
+                rank_schedule=None,
+                update_gap_schedule=None,
+                update_gap_schedule_mode: str | None = None,
+                update_gap_cosine: dict | None = None,
+                total_steps: int | None = None,
+            ):
                 self.enabled = enabled
                 self.rank = int(rank)
                 self.update_gap = int(update_gap)
@@ -277,6 +289,70 @@ class GaLoreTrainer:
                 self.step = 0
                 # param_name -> (U, V)
                 self.bases = {}
+
+                # Optional schedules: list of {"step": int, "value": int}.
+                # Example:
+                #   rank_schedule: [{step: 0, value: 32}, {step: 200, value: 64}]
+                #   update_gap_schedule: [{step: 0, value: 400}, {step: 1000, value: 200}]
+                self.rank_schedule = self._normalize_schedule(rank_schedule)
+                self.update_gap_schedule = self._normalize_schedule(update_gap_schedule)
+
+                self.update_gap_schedule_mode = (update_gap_schedule_mode or '').strip().lower() or None
+                self.update_gap_cosine = update_gap_cosine or {}
+                # Total number of *optimizer* steps (not micro-steps). If None, the
+                # trainer may fill it in once training starts.
+                self.total_steps = int(total_steps) if total_steps is not None else None
+
+            @staticmethod
+            def _normalize_schedule(schedule):
+                if not schedule:
+                    return []
+                out = []
+                for item in schedule:
+                    if not isinstance(item, dict):
+                        continue
+                    if 'step' not in item:
+                        continue
+                    # accept {step, value} or {step, rank} / {step, update_gap}
+                    value = item.get('value', item.get('rank', item.get('update_gap')))
+                    if value is None:
+                        continue
+                    out.append({'step': int(item['step']), 'value': int(value)})
+                out.sort(key=lambda x: x['step'])
+                return out
+
+            def _scheduled_value(self, schedule, default: int) -> int:
+                if not schedule:
+                    return int(default)
+                v = int(default)
+                for item in schedule:
+                    if self.step >= int(item['step']):
+                        v = int(item['value'])
+                    else:
+                        break
+                return int(v)
+
+            def _cosine_gap(self, default: int) -> int:
+                # Cosine schedule from max_gap (early) to min_gap (late).
+                if self.update_gap_schedule_mode != 'cosine':
+                    return int(default)
+                if not self.total_steps or self.total_steps <= 0:
+                    return int(default)
+
+                import math
+
+                max_gap = int(self.update_gap_cosine.get('max_gap', default))
+                min_gap = int(self.update_gap_cosine.get('min_gap', max(1, int(default // 4))))
+                if min_gap < 1:
+                    min_gap = 1
+                if max_gap < min_gap:
+                    max_gap, min_gap = min_gap, max_gap
+
+                t = float(self.step) / float(max(1, self.total_steps))
+                t = max(0.0, min(1.0, t))
+                # t=0 -> max_gap, t=1 -> min_gap
+                gap_f = min_gap + 0.5 * (max_gap - min_gap) * (1.0 + math.cos(math.pi * t))
+                return int(max(1, round(gap_f)))
 
             def _compute_basis(self, g: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
                 # g: [m, n]
@@ -297,6 +373,22 @@ class GaLoreTrainer:
                     return
 
                 self.step += 1
+
+                # Apply schedules (if configured)
+                new_rank = self._scheduled_value(self.rank_schedule, self.rank)
+                # Priority order for update_gap:
+                # 1) explicit step schedule
+                # 2) cosine schedule
+                # 3) existing value
+                if self.update_gap_schedule:
+                    new_gap = self._scheduled_value(self.update_gap_schedule, self.update_gap)
+                else:
+                    new_gap = self._cosine_gap(self.update_gap)
+                if new_rank != self.rank or new_gap != self.update_gap:
+                    self.rank = int(new_rank)
+                    self.update_gap = int(new_gap)
+                    # Projection bases remain valid; rank changes will affect future basis updates.
+                    self.logger.info(f"[Projection] schedule applied at step={self.step}: rank={self.rank}, update_gap={self.update_gap}")
 
                 force_update = (self.step % max(1, self.update_gap) == 0)
 
@@ -333,6 +425,11 @@ class GaLoreTrainer:
             update_gap=int(proj_cfg.get('update_gap', self.config['galore'].get('update_proj_gap', 200))),
             drift_threshold=float(proj_cfg.get('drift_threshold', 0.35)),
             logger=self.logger,
+            rank_schedule=proj_cfg.get('rank_schedule', None),
+            update_gap_schedule=proj_cfg.get('update_gap_schedule', None),
+            update_gap_schedule_mode=proj_cfg.get('update_gap_schedule_mode', None),
+            update_gap_cosine=proj_cfg.get('update_gap_cosine', None),
+            total_steps=proj_cfg.get('total_steps', None),
         )
 
         class DistillTrainer(Trainer):
@@ -396,7 +493,17 @@ class GaLoreTrainer:
                 self.accelerator.backward(loss)
 
                 # Apply low-rank gradient projection (GaLore-like) before optimizer step.
-                if self.proj_controller is not None:
+                # Only do this on *optimizer steps* (after gradient accumulation)
+                # so schedules are expressed in global steps.
+                if self.proj_controller is not None and getattr(self.accelerator, 'sync_gradients', True):
+                    # Fill total_steps lazily from Trainer state when possible.
+                    if getattr(self.proj_controller, 'total_steps', None) in (None, 0):
+                        try:
+                            ts = int(getattr(self.state, 'max_steps', 0) or 0)
+                            if ts > 0:
+                                self.proj_controller.total_steps = ts
+                        except Exception:
+                            pass
                     self.proj_controller.maybe_update_and_project(model)
 
                 return loss.detach()

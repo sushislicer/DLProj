@@ -62,6 +62,9 @@ class SpinQuantizer:
         self.logger.info("Residual model loaded successfully")
         self.memory_tracker.log_memory("SpinQuant", "Residual model loaded")
         print_model_size(self.model, "Residual Model (Pre-Quantization)")
+
+        # For reporting/visualization
+        self.layer_summary = {}
     
     def prepare_calibration_data(self):
         """
@@ -246,6 +249,7 @@ class SpinQuantizer:
             activation_samples=activation_samples,
         )
         self.logger.info(f"SpinQuant-lite updated layers: {len(layer_summary)}")
+        self.layer_summary = layer_summary
 
         # Optional: convert to *real* bitsandbytes quantized modules for lower VRAM.
         # This more closely matches the benchmarking runner's 4-bit weight memory.
@@ -349,6 +353,13 @@ class SpinQuantizer:
         quant_config_path = os.path.join(output_dir, 'quantization_config.json')
         with open(quant_config_path, 'w') as f:
             json.dump(self.config['spinquant'], f, indent=2)
+
+        # Save SpinQuant-lite per-layer summary for paper figures.
+        if getattr(self, 'layer_summary', None):
+            summary_path = os.path.join(output_dir, 'spinquant_layer_summary.json')
+            with open(summary_path, 'w') as f:
+                json.dump(self.layer_summary, f, indent=2)
+            self.logger.info(f"SpinQuant layer summary saved to {summary_path}")
         
         self.logger.info("Quantized model saved successfully")
     

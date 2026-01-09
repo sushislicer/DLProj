@@ -300,6 +300,8 @@ def create_default_config():
         'seed': 42,
         'num_epochs': 3,
         'batch_size': 4,
+        # NOTE: This dataset is for *adapter training* in the pipeline.
+        # Benchmark datasets (AIME/MATH/GPQA/...) are configured separately.
         'dataset': 'c4',
         'pissa': {
             'rank': 64,
@@ -351,6 +353,9 @@ def create_default_config():
             'rank': 64,
             'update_gap': 200,
             'drift_threshold': 0.35,
+            # Optional schedules (step-based):
+            # 'rank_schedule': [{'step': 0, 'value': 32}, {'step': 200, 'value': 64}],
+            # 'update_gap_schedule': [{'step': 0, 'value': 400}, {'step': 1000, 'value': 200}],
         },
     }
 

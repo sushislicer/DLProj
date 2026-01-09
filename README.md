@@ -22,6 +22,20 @@ The benchmarking framework lives under [`scripts/run_benchmarks.py`](scripts/run
 - Quick start: [`README_BENCHMARKING.md`](README_BENCHMARKING.md)
 - Full guide: [`docs/BENCHMARKING_GUIDE.md`](docs/BENCHMARKING_GUIDE.md:1)
 
+## Paper figures / visualization
+
+After running the pipeline and/or benchmarks, generate paper-ready figures:
+
+```bash
+python scripts/make_paper_figures.py \
+  --log_dir logs \
+  --pipeline_outputs outputs \
+  --benchmark_results benchmark_results \
+  --output_dir paper_figures
+```
+
+Entry point: [`scripts/make_paper_figures.py`](scripts/make_paper_figures.py:1)
+
 Important distinction:
 - The benchmarking runner's `--quantize` flag uses **BitsAndBytes 4-bit quantization**.
 - The pipeline's SpinQuant stage is a *separate workflow* implemented in [`scripts/spinquant.py`](scripts/spinquant.py:1).
