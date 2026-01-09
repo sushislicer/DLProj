@@ -1,0 +1,42 @@
+\section{Theory: Tying Low-Rank Adaptation and Rotation-Aware Quantization}
+\label{sec:theory}
+
+This section gives a compact mathematical view of why \method combines naturally.
+The goal is not to provide a tight new bound, but to make explicit the shared structure of the three components.
+
+\subsection{A constrained view of adaptation under quantized deployment}
+Let $\theta$ denote base weights and $\phi$ denote adapter parameters.
+We can view the deployment-constrained objective as
+\begin{equation}
+  \min_{\phi,\,\{\R_\ell\}}\; \E\,\ell\Big(f\big(x;\{\Q_b(\W_\ell\R_\ell),\phi\}\big),y\Big)
+  \quad \text{s.t.}\; \R_\ell^\top\R_\ell=\I,\; \mathrm{rank}(\Delta\W_\ell)\le r.
+  \label{eq:joint_obj}
+\end{equation}
+Here $\ell$ indexes linear layers, $\Delta\W_\ell$ is the low-rank update induced by adapters, and $\Q_b$ is a low-bit quantizer.
+\method can be interpreted as an alternating approximation to \cref{eq:joint_obj}:
+PiSSA provides an initialization for the low-rank constraint, SpinQuant-lite fixes a structured choice of $\R_\ell$, and GaLore accelerates optimization over $\phi$.
+
+\subsection{Why orthogonal mixing helps quantization}
+Quantization introduces an error $\bm{E}_\ell = \Q_b(\W_\ell\R_\ell) - \W_\ell\R_\ell$.
+For an input activation $\bm{x}$, the induced output perturbation is
+\begin{equation}
+  \delta \bm{y} \;=\; (\bm{x}\R_\ell^\top)\,\bm{E}_\ell^\top.
+  \label{eq:delta_y}
+\end{equation}
+For many quantizers, the magnitude of $\bm{E}_\ell$ depends on the distribution of entries (or per-channel scales) in $\W_\ell\R_\ell$.
+Orthogonal mixing redistributes energy across dimensions without changing the Frobenius norm:
+\begin{equation}
+  \|\W_\ell\R_\ell\|_F = \|\W_\ell\|_F.
+\end{equation}
+In particular, a Hadamard transform approximately ``whitens'' coordinates by mixing signs and permuting mass, which empirically reduces outlier dominance and improves quantization fidelity.
+This provides an inexpensive alternative to learned rotations when runtime is limited.
+
+\subsection{Projected gradients as implicit low-rank regularization}
+GaLore-style projection in \cref{eq:galore_proj} can be interpreted as optimizing with gradients constrained to a rank-$k$ tangent set.
+For a 2D parameter $\bm{P}$, the update $\bm{P}\leftarrow \bm{P}-\eta\bm{G}_{\text{proj}}$ is the steepest descent direction under the restriction that the update lies in the span defined by $(\U,\V)$.
+When applied to adapter parameters (already low-dimensional), this can stabilize updates and reduce the effective optimizer memory footprint.
+
+\subsection{Putting it together}
+Under quantized deployment, training should account for quantization-induced perturbations.
+\method operationalizes this principle: PiSSA gives a strong low-rank starting point, SpinQuant-lite reduces quantization error of the (residual) base weights by orthogonal mixing, and GaLore accelerates adapter optimization under tight budgets.
+

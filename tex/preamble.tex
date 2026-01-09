@@ -1,6 +1,45 @@
 %% This file contains a number of tweaks that are typically applied to the main document.
 %% They are not enabled by default, but can be enabled by uncommenting the relevant lines.
 
+% ------------------------------------------------------------
+% Project-specific preamble (safe to include before hyperref)
+% ------------------------------------------------------------
+
+% Math
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{bm}
+
+% Tables/figures
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{graphicx}
+
+% Utilities
+\usepackage{xspace}
+\usepackage{enumitem}
+\setlist[itemize]{leftmargin=*,noitemsep,topsep=2pt}
+\setlist[enumerate]{leftmargin=*,noitemsep,topsep=2pt}
+
+% Cross-references
+\usepackage[capitalize,noabbrev]{cleveref}
+
+% Common math operators
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclareMathOperator*{\argmax}{arg\,max}
+
+% Notation shortcuts
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\W}{\bm{W}}
+\newcommand{\A}{\bm{A}}
+\newcommand{\B}{\bm{B}}
+\newcommand{\I}{\bm{I}}
+\newcommand{\Q}{\mathcal{Q}}
+\newcommand{\E}{\mathbb{E}}
+
+% Project/method naming
+\newcommand{\method}{PiSSA\textendash SpinQuant\textendash GaLore\xspace}
+\newcommand{\qwen}{Qwen2.5\xspace}
+
 %%
 %% Inline annotations; for predefined colors, refer to "dvipsnames" in the xcolor package:
 %% https://tinyurl.com/overleaf-colors

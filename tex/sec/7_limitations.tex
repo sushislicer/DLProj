@@ -1,0 +1,15 @@
+\section{Limitations and Discussion}
+\label{sec:limits}
+
+\paragraph{Draft status of results.}
+At the time of writing, the benchmark harness is implemented and the tables in \cref{sec:results} are placeholders.
+Final numbers will be inserted once the full benchmark sweep completes.
+
+\paragraph{Fixed rotations are a pragmatic choice.}
+While learned rotations (as in SpinQuant) can further reduce quantization error, they can be expensive for large models.
+We default to blockwise Hadamard rotations for bounded runtime; this may not be optimal for every layer or architecture.
+
+\paragraph{Scope.}
+This work focuses on a practical adaptation and quantization pipeline rather than proposing a new quantizer or a new adapter family.
+The primary contribution is the integration and the accompanying mathematical viewpoint.
+

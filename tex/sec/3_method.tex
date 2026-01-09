@@ -1,0 +1,77 @@
+\section{Method}
+\label{sec:method}
+
+\subsection{Problem setup}
+We consider a pretrained causal LLM with parameters $\theta$.
+For a given task distribution $(x,y) \sim \mathcal{D}$, adaptation minimizes an expected loss
+\begin{equation}
+  \min_{\theta'} \; \E_{(x,y)\sim\mathcal{D}}\,\ell\big(f(x;\theta'),y\big).
+  \label{eq:task_obj}
+\end{equation}
+In the deployment setting of interest, inference uses low-bit quantized weights.
+Let $\Q_b(\cdot)$ denote a $b$-bit quantizer (e.g., NF4 with double quantization).
+We therefore care about the quantized model $f(x;\Q_b(\theta'))$.
+
+\subsection{Overview of \method}
+\method decomposes adaptation into three stages:
+\begin{enumerate}
+  \item \textbf{PiSSA stage (adapter construction).} Insert LoRA modules into selected linear layers and initialize the low-rank factors using PiSSA~\cite{pissa2024}.
+  \item \textbf{SpinQuant stage (rotation-aware residual quantization).} Apply an orthogonal mixing transform to selected weight matrices before quantization (SpinQuant-inspired)~\cite{spinquant2024}.
+  \item \textbf{GaLore stage (adapter training).} Train only adapter parameters, optionally projecting 2D gradients to a low-rank subspace (GaLore-style)~\cite{galore2024}.
+\end{enumerate}
+In practice, stage (2) is implemented with a fast fixed Hadamard transform to keep runtime bounded.
+
+\subsection{PiSSA-initialized low-rank adapters}
+Consider a linear transformation with weight $\W \in \R^{d_{\text{out}}\times d_{\text{in}}}$.
+LoRA parameterizes an update as
+\begin{equation}
+  \W' = \W + \Delta\W, \quad \Delta\W = \B\A,
+  \label{eq:lora}
+\end{equation}
+where $\B\in\R^{d_{\text{out}}\times r}$ and $\A\in\R^{r\times d_{\text{in}}}$ with $r \ll \min(d_{\text{out}},d_{\text{in}})$.
+PiSSA initializes $(\A,\B)$ from the truncated SVD of $\W$.
+Let $\W \approx \U_r \Sigma_r \V_r^\top$ be the rank-$r$ approximation.
+One convenient factorization is
+\begin{equation}
+  \B_0 = \U_r\,\Sigma_r^{1/2}, \qquad \A_0 = \Sigma_r^{1/2}\,\V_r^\top,
+  \label{eq:pissa_init}
+\end{equation}
+which aligns the update subspace with dominant directions of $\W$.
+In our pipeline implementation, PiSSA is applied through PEFT's PiSSA initializer while keeping the base weights unchanged.
+
+\subsection{SpinQuant-inspired orthogonal mixing before quantization}
+Quantization error is often dominated by outlier directions.
+SpinQuant~\cite{spinquant2024} proposes learning orthogonal rotations that improve quantization fidelity.
+For a linear layer, we consider right-multiplying $\W$ by an orthogonal matrix $\R$:
+\begin{equation}
+  \W_{\R} = \W\R, \qquad \R^\top\R = \I.
+  \label{eq:rotate}
+\end{equation}
+We then quantize the rotated weights $\widehat{\W}_{\R} = \Q_b(\W_{\R})$.
+At inference time, the rotation can be absorbed into activations: for input activation $\bm{x}$,
+\begin{equation}
+  \bm{x}\W^\top \;\approx\; (\bm{x}\R^\top)\,\widehat{\W}_{\R}^\top.
+  \label{eq:rotate_infer}
+\end{equation}
+
+\paragraph{SpinQuant-lite (fixed Hadamard backend).}
+Learning $\R$ per-layer can be costly.
+To keep runtime bounded, we default to a blockwise Hadamard transform $\R=\mathrm{diag}(\H,\H,\dots)$ where $\H\H^\top=\I$ and $\H$ is the normalized Hadamard matrix.
+This acts as a cheap mixing transform that reduces per-dimension variance and typically lowers quantization error.
+
+\subsection{GaLore-style projected-gradient adapter training}
+Given the adapter parameters $\phi$ (collecting all $\A$ and $\B$ factors), we optimize
+\begin{equation}
+  \min_{\phi} \; \E\,\ell\big(f(x;\Q_b(\theta,\phi)),y\big),
+\end{equation}
+with $\theta$ frozen.
+
+GaLore~\cite{galore2024} observes that many gradients are approximately low-rank.
+For any 2D parameter $\bm{P}\in\R^{m\times n}$ with gradient $\bm{G}$, GaLore constructs a rank-$k$ basis and projects
+\begin{equation}
+  \bm{G}_{\text{proj}} = \U\,(\U^\top \bm{G}\,\V)\,\V^\top,
+  \label{eq:galore_proj}
+\end{equation}
+where $\U\in\R^{m\times k}$ and $\V\in\R^{n\times k}$.
+In our implementation, we optionally apply this projection to adapter gradients on a fixed schedule.
+

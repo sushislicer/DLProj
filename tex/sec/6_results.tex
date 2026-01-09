@@ -1,0 +1,26 @@
+\section{Results}
+\label{sec:results}
+
+This draft includes placeholders for the main tables.
+The benchmark harness writes JSON outputs under the configured results directory; these numbers will be filled in once runs complete.
+
+\begin{table*}[t]
+  \centering
+  \caption{Main results on reasoning benchmarks. \textbf{TBD}: to be populated from the results folder produced by the benchmarking scripts.}
+  \label{tab:main_results}
+  \begin{tabular}{lcccccc}
+    \toprule
+    Model & Method & Quant & AIME (Acc) & MATH (Acc) & GPQA (Acc) & LiveCodeBench (Pass) \\
+    \midrule
+    \qwen{}-14B & Baseline & 4-bit & \TODO{TBD} & \TODO{TBD} & \TODO{TBD} & \TODO{TBD} \\
+    \qwen{}-14B & \method & 4-bit & \TODO{TBD} & \TODO{TBD} & \TODO{TBD} & \TODO{TBD} \\
+    \midrule
+    \qwen{}-72B & Baseline & 4-bit & \TODO{TBD} & \TODO{TBD} & \TODO{TBD} & \TODO{TBD} \\
+    \qwen{}-72B & \method & 4-bit & \TODO{TBD} & \TODO{TBD} & \TODO{TBD} & \TODO{TBD} \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+\paragraph{Notes.}
+The benchmark configuration includes time budgets and per-benchmark sample sizes.
+We will report the exact configuration hash and the hardware summary (GPU type, memory) from the benchmark runner logs.

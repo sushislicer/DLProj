@@ -1,0 +1,21 @@
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{Parameter-efficient adaptation.}
+Low-rank adaptation (LoRA)~\cite{hu2022lora} parameterizes a weight update as a rank-$r$ matrix, enabling fine-tuning with far fewer trainable parameters.
+QLoRA~\cite{dettmers2023qlora} couples 4-bit quantized base weights with low-rank adapters to reduce training memory.
+PiSSA~\cite{pissa2024} improves LoRA optimization by initializing low-rank factors from the dominant singular subspace of the target weight matrix.
+
+\paragraph{Post-training quantization of LLMs.}
+PTQ methods such as GPTQ~\cite{frantar2023gptq} and AWQ~\cite{lin2023awq} focus on minimizing accuracy loss under low-bit quantization.
+SmoothQuant~\cite{xiao2023smoothquant} rescales activations and weights to reduce outlier-induced quantization error.
+SpinQuant~\cite{spinquant2024} proposes learning orthogonal rotations to ``spread'' quantization error, improving low-bit quantization fidelity.
+
+\paragraph{Efficient optimization.}
+GaLore~\cite{galore2024} reduces optimizer memory by projecting gradients onto a low-rank subspace.
+While GaLore was proposed for training large models, its projected-gradient viewpoint is also useful for adapter training when compute budgets are bounded.
+
+\paragraph{Positioning.}
+\method is intentionally pragmatic: rather than introducing a new backbone or a new quantizer in isolation, we connect PiSSA initialization, SpinQuant-style rotations, and GaLore-style projected gradients into one reproducible pipeline.
+Our primary design goal is to make ``quantized serving'' a first-class constraint during adapter training.
+

@@ -148,6 +148,18 @@ class GaLoreTrainer:
             is_trainable=True
         )
 
+        # If gradient checkpointing is enabled, Transformers uses torch.utils.checkpoint,
+        # which requires at least one checkpoint input to have requires_grad=True.
+        # With adapter-only training, this can be violated unless we explicitly
+        # enable input grads.
+        try:
+            if hasattr(self.model, 'enable_input_require_grads'):
+                self.model.enable_input_require_grads()
+            elif hasattr(self.base_model, 'enable_input_require_grads'):
+                self.base_model.enable_input_require_grads()
+        except Exception:
+            pass
+
         # Optional: teacher model for post-quant distillation.
         # Teacher is typically the fp16 residual model (pre-quant) with the same
         # initial PiSSA adapters applied.

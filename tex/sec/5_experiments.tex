@@ -1,0 +1,41 @@
+\section{Experimental Setup}
+\label{sec:experiments}
+
+This section describes the experimental protocol as implemented in the repository benchmarking harness.
+
+\subsection{Models}
+We evaluate \qwen instruction-tuned models across multiple sizes.
+The benchmark configuration enumerates model identifiers and their per-size generation settings.
+
+\subsection{Benchmarks}
+We use difficult reasoning and knowledge benchmarks implemented in the codebase:
+\begin{itemize}
+  \item \textbf{AIME} (exact match; short-answer reasoning)
+  \item \textbf{MATH} (exact match)
+  \item \textbf{GPQA} (multiple choice)
+  \item \textbf{LiveCodeBench} (code execution)
+\end{itemize}
+These correspond to the benchmark runners in the repository and are orchestrated via the benchmark entrypoint.
+
+\subsection{Quantization and pipeline configuration}
+Unless stated otherwise, inference is performed with 4-bit weight quantization (NF4) and double quantization.
+For the pipeline, the key configuration choices are:
+\begin{itemize}
+  \item PiSSA LoRA rank $r$ and target modules (attention and MLP projections).
+  \item SpinQuant-lite backend set to a fixed Hadamard rotation (blockwise) for bounded runtime.
+  \item GaLore/gradient projection enabled with a periodic update schedule.
+\end{itemize}
+
+\subsection{Implementation and hardware}
+All experiments are run through the provided scripts.
+For example, a typical run executes the pipeline and then benchmarks:
+\begin{verbatim}
+python3 scripts/run_benchmarks.py \
+  --config configs/benchmark_config_4x5090.yaml \
+  --model_sizes 14B --num_gpus 4 --time_budget 4 \
+  --quantize --run_pipeline --pipeline_config configs/pipeline_config.yaml \
+  --pipeline_output_root outputs/pipeline --run_baselines
+\end{verbatim}
+
+We report performance metrics (accuracy/pass@1 and throughput/latency) and system memory usage as logged by the benchmark runner.
+
