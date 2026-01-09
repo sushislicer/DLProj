@@ -1,0 +1,203 @@
+# Benchmark config tuned for a 4× RTX 5090 (32GB) box.
+#
+# Goal: avoid the “0% on 5 samples” issue while still staying within ~2–4h
+# depending on whether you enable baselines.
+#
+# Notes:
+# - This file is intentionally conservative for 72B (still expensive) but gives
+#   much larger sample sizes for 14B vs the ultra-fast defaults.
+# - For truly stable numbers, download the real datasets instead of relying on
+#   the built-in sample fallbacks.
+
+models:
+  - name: "Qwen/Qwen2.5-0.5B-Instruct"
+    size: "0.5B"
+    max_length: 2048
+    batch_size: 32
+    max_batch_size: 64
+    min_batch_size: 16
+    quantization: "4bit"
+    skip_benchmarks: []
+
+  - name: "Qwen/Qwen2.5-7B-Instruct"
+    size: "7B"
+    max_length: 4096
+    batch_size: 8
+    max_batch_size: 16
+    min_batch_size: 4
+    quantization: "4bit"
+    skip_benchmarks: []
+
+  - name: "Qwen/Qwen2.5-14B-Instruct"
+    size: "14B"
+    max_length: 4096
+    batch_size: 6
+    max_batch_size: 8
+    min_batch_size: 2
+    quantization: "4bit"
+    # SWE-Bench is slow and not a full harness in this repo.
+    skip_benchmarks: ["swe_bench"]
+    use_dynamic_batching: true
+    early_stopping: true
+    optimize_generation: true
+    aggressive_optimization: true
+
+  - name: "Qwen/Qwen2.5-72B-Instruct"
+    size: "72B"
+    max_length: 4096
+    batch_size: 2
+    max_batch_size: 4
+    min_batch_size: 1
+    quantization: "4bit"
+    skip_benchmarks: ["swe_bench", "livecodebench"]
+    use_dynamic_batching: true
+    early_stopping: true
+    optimize_generation: true
+    aggressive_optimization: true
+
+gpu:
+  num_gpus: 4
+  device_map: "auto"
+  torch_dtype: "float16"
+  trust_remote_code: true
+  quantization:
+    enabled: true
+    bits: 4
+    quant_type: "nf4"
+    double_quant: true
+    compute_dtype: "float16"
+    use_flash_attention: true
+
+benchmarks:
+  aime:
+    enabled: true
+    dataset_path: "datasets/aime"
+    num_samples: 100
+    num_samples_14b: 50
+    num_samples_72b: 15
+    max_length: 2048
+    max_new_tokens: 192
+    temperature: 0.0
+    top_p: 1.0
+    top_k: 1
+    num_beams: 1
+    do_sample: false
+    metrics: ["accuracy", "pass_at_1", "memory_usage", "inference_time", "throughput"]
+    evaluation_type: "exact_match"
+    timeout: 90
+    early_stopping_tokens: ["Answer:", "Therefore", "The answer is"]
+
+  math:
+    enabled: true
+    dataset_path: "datasets/math"
+    num_samples: 300
+    num_samples_14b: 120
+    num_samples_72b: 30
+    max_length: 2048
+    max_new_tokens: 192
+    temperature: 0.0
+    top_p: 1.0
+    top_k: 1
+    num_beams: 1
+    do_sample: false
+    metrics: ["accuracy", "pass_at_1", "memory_usage", "inference_time", "throughput"]
+    evaluation_type: "exact_match"
+    timeout: 90
+    early_stopping_tokens: ["Answer:", "Therefore", "Final answer", "The answer is"]
+
+  livecodebench:
+    enabled: true
+    dataset_path: "datasets/livecodebench"
+    num_samples: 60
+    num_samples_14b: 20
+    num_samples_72b: 0
+    max_length: 4096
+    max_new_tokens: 256
+    temperature: 0.2
+    top_p: 0.95
+    top_k: 50
+    num_beams: 1
+    do_sample: true
+    metrics: ["pass_rate", "pass_at_1", "memory_usage", "inference_time", "throughput"]
+    evaluation_type: "code_execution"
+    timeout: 60
+    num_test_cases: 3
+
+  swe_bench:
+    enabled: false
+    dataset_path: "datasets/swe_bench"
+    num_samples: 0
+
+  gpqa:
+    enabled: true
+    dataset_path: "datasets/gpqa"
+    num_samples: 300
+    num_samples_14b: 150
+    num_samples_72b: 40
+    max_length: 2048
+    max_new_tokens: 96
+    temperature: 0.0
+    top_p: 1.0
+    top_k: 1
+    num_beams: 1
+    do_sample: false
+    metrics: ["accuracy", "pass_at_1", "memory_usage", "inference_time", "throughput"]
+    evaluation_type: "multiple_choice"
+    timeout: 60
+    early_stopping_tokens: ["Answer:", "The answer is", "Therefore"]
+
+evaluation:
+  num_workers: 8
+  cache_dir: "cache"
+  save_predictions: true
+  save_intermediate_results: true
+  verbose: true
+  parallel_evaluation: true
+
+output:
+  base_dir: "benchmark_results"
+  format: "json"
+  include_timestamp: true
+  include_model_info: true
+  include_system_info: true
+
+logging:
+  log_dir: "logs/benchmark"
+  level: "INFO"
+  log_to_file: true
+  log_to_console: true
+
+advanced:
+  use_flash_attention: true
+  use_cache: true
+  gradient_checkpointing: false
+  low_cpu_mem_usage: true
+  device_map_options:
+    offload_folder: "offload"
+
+execution:
+  max_execution_time: 4
+  enable_time_budget: true
+  skip_slow_benchmarks: true
+  benchmark_priority: ["gpqa", "aime", "math", "livecodebench", "swe_bench"]
+  model_priority: ["0.5B", "7B", "14B", "72B"]
+
+baselines:
+  quantization_4bit:
+    enabled: true
+    name: "4-bit Quantization (No Adapters)"
+    quantization: "4bit"
+    use_adapters: false
+  quantization_4bit_lora:
+    enabled: true
+    name: "4-bit QLoRA (Adapters)"
+    quantization: "4bit"
+    use_adapters: true
+    adapter_path: "outputs/trained_adapters"
+
+debug:
+  enabled: false
+  use_debug_samples: true
+  compare_baselines: true
+  debug_sample_size: 5
+

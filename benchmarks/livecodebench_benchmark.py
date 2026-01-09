@@ -10,6 +10,7 @@ import re
 import subprocess
 import tempfile
 import multiprocessing as mp
+import ast
 from .base_benchmark import CodeExecutionBenchmark
 
 
@@ -188,8 +189,43 @@ Solution:"""
         if function_match:
             return function_match.group(0).strip()
         
-        # Pattern 4: If no code block found, return the entire response
+        # Pattern 4: Heuristic: start from first plausible code line.
+        # Many models emit brief prose before code; executing prose will raise
+        # SyntaxError. Prefer slicing from `def` / `import`.
+        idx_def = response.find("def ")
+        idx_imp = response.find("import ")
+        candidates = [i for i in [idx_def, idx_imp] if i != -1]
+        if candidates:
+            return response[min(candidates):].strip()
+
+        # Pattern 5: If no clear code found, return the entire response.
         return response.strip()
+
+    @staticmethod
+    def _sanitize_python(code: str) -> str:
+        """Best-effort sanitize model output into valid python.
+
+        Strategy:
+        - Strip markdown fences if present.
+        - If it doesn't parse, drop leading lines until it parses.
+        """
+        c = (code or "").strip()
+        # Remove fenced blocks if the model returned them without being matched.
+        c = re.sub(r"^```(?:python)?\s*\n", "", c, flags=re.IGNORECASE)
+        c = re.sub(r"\n```\s*$", "", c)
+
+        lines = c.splitlines()
+        # Try progressively dropping leading lines to get a valid module.
+        for start in range(0, min(len(lines), 15)):
+            candidate = "\n".join(lines[start:]).strip()
+            if not candidate:
+                continue
+            try:
+                ast.parse(candidate)
+                return candidate
+            except SyntaxError:
+                continue
+        return c
     
     def _evaluate_sample(self, prediction: Any, ground_truth: Any) -> bool:
         """
@@ -205,7 +241,7 @@ Solution:"""
         if prediction is None or ground_truth is None:
             return False
         
-        code = str(prediction).strip()
+        code = self._sanitize_python(str(prediction))
         test_cases = ground_truth.get('test_cases', [])
         function_name = ground_truth.get('function_name', 'solution')
         

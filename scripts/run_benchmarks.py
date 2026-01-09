@@ -237,6 +237,13 @@ class BenchmarkRunner:
         # Set pad token if not exists
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
+
+        # Decoder-only models should left-pad for batched generation.
+        # Right padding can cause incorrect attention for some architectures.
+        try:
+            tokenizer.padding_side = "left"
+        except Exception:
+            pass
         
         # Load model with device map and quantization
         self.logger.info("Loading model...")
@@ -358,7 +365,15 @@ class BenchmarkRunner:
         # 4-bit QLoRA baseline (4-bit base + adapters)
         b2 = baselines_cfg.get('quantization_4bit_lora', {})
         if b2.get('enabled', False):
-            variants.append(_mk_variant(model_config, 'baseline_4bit_qlora', b2))
+            cand = _mk_variant(model_config, 'baseline_4bit_qlora', b2)
+            ap = cand.get('adapter_path')
+            if not ap or not os.path.exists(str(ap)):
+                self.logger.warning(
+                    "Skipping baseline_4bit_qlora because adapter_path is missing. "
+                    f"Set baselines.quantization_4bit_lora.adapter_path to a valid PEFT adapter directory. Got: {ap}"
+                )
+            else:
+                variants.append(cand)
 
         return variants
     
@@ -459,6 +474,39 @@ class BenchmarkRunner:
         self.logger.info(f"BENCHMARKING MODEL: {model_name} ({model_size}) [{variant}]")
         self.logger.info("=" * 80)
         
+        def _max_memory_to_gb(v) -> float:
+            """Parse a max_memory entry to GB.
+
+            HuggingFace accepts either strings like "20GB" or integer bytes.
+            Some environments/tooling end up passing ints here.
+            """
+            if isinstance(v, (int, float)):
+                # Heuristic: values above ~1024 are almost certainly bytes.
+                if float(v) > 1024.0:
+                    return float(v) / (1024.0 ** 3)
+                return float(v)
+
+            s = str(v).strip().upper()
+            try:
+                if s.endswith("GB"):
+                    return float(s[:-2].strip())
+                if s.endswith("GIB"):
+                    return float(s[:-3].strip())
+                if s.endswith("MB"):
+                    return float(s[:-2].strip()) / 1024.0
+                if s.endswith("MIB"):
+                    return float(s[:-3].strip()) / 1024.0
+                if s.endswith("B") and s[:-1].strip().isdigit():
+                    return float(s[:-1].strip()) / (1024.0 ** 3)
+            except Exception:
+                pass
+
+            # Fallback: try direct float
+            try:
+                return float(s)
+            except Exception:
+                return 0.0
+
         # Apply 14B/72B-specific optimizations before loading model
         if model_size in ["14B", "72B"] and model_config.get('aggressive_optimization', False):
             self.logger.info(f"Applying aggressive optimizations for {model_size} model")
@@ -466,8 +514,9 @@ class BenchmarkRunner:
             if 'max_memory' in self.device_map:
                 for i in self.device_map['max_memory']:
                     # Use 95% instead of 90% for 14B/72B
-                    current_val = int(self.device_map['max_memory'][i].replace('GB', ''))
-                    self.device_map['max_memory'][i] = f"{int(current_val * 1.056)}GB"  # 95/90 = 1.056
+                    current_gb = _max_memory_to_gb(self.device_map['max_memory'][i])
+                    boosted_gb = int(max(1.0, current_gb * 1.056))  # 95/90 = 1.056
+                    self.device_map['max_memory'][i] = f"{boosted_gb}GB"
                 self.logger.info(f"Optimized GPU memory for {model_size}: {self.device_map['max_memory']}")
         
         # Load model
@@ -629,6 +678,9 @@ class BenchmarkRunner:
         
         # Save final results
         self._save_results(self.results, 'final_results')
+
+        # Save quick charts for clarity (optional; requires matplotlib/seaborn).
+        self._save_quick_charts()
         
         # Stop memory tracking
         self.memory_tracker.stop_tracking()
@@ -636,6 +688,74 @@ class BenchmarkRunner:
         
         # Print summary
         self._print_summary()
+
+    def _save_quick_charts(self) -> None:
+        """Write a couple of quick PNG charts into the run output directory.
+
+        This is a convenience so you can see results immediately without running
+        the full report generator.
+        """
+        try:
+            import matplotlib.pyplot as plt
+            import seaborn as sns
+            import pandas as pd
+        except Exception as e:
+            self.logger.info(f"Plotting dependencies not available; skipping quick charts. ({e})")
+            return
+
+        rows = []
+        for model_key, model_data in self.results.get('benchmarks', {}).items():
+            if not isinstance(model_data, dict):
+                continue
+            benches = model_data.get('benchmarks', {})
+            if not isinstance(benches, dict):
+                continue
+            for bench_name, bench_data in benches.items():
+                if not isinstance(bench_data, dict):
+                    continue
+                metrics = bench_data.get('metrics', {})
+                if not isinstance(metrics, dict):
+                    continue
+                row = {
+                    'model': model_key,
+                    'benchmark': bench_name,
+                    'accuracy': metrics.get('accuracy', None),
+                    'throughput': metrics.get('throughput', None),
+                    'avg_latency': metrics.get('avg_latency', None),
+                }
+                rows.append(row)
+
+        if not rows:
+            return
+
+        df = pd.DataFrame(rows)
+        sns.set_theme(style='whitegrid')
+
+        # Accuracy chart
+        if df['accuracy'].notna().any():
+            p = df.dropna(subset=['accuracy'])
+            plt.figure(figsize=(12, 5))
+            sns.barplot(data=p, x='benchmark', y='accuracy', hue='model')
+            plt.title('Accuracy by benchmark (per model/variant)')
+            plt.xticks(rotation=30, ha='right')
+            plt.tight_layout()
+            out_path = os.path.join(self.output_dir, 'quick_accuracy.png')
+            plt.savefig(out_path, dpi=200)
+            plt.close()
+            self.logger.info(f"Quick chart saved to: {out_path}")
+
+        # Throughput chart
+        if df['throughput'].notna().any():
+            p = df.dropna(subset=['throughput'])
+            plt.figure(figsize=(12, 5))
+            sns.barplot(data=p, x='benchmark', y='throughput', hue='model')
+            plt.title('Throughput (samples/s) by benchmark (per model/variant)')
+            plt.xticks(rotation=30, ha='right')
+            plt.tight_layout()
+            out_path = os.path.join(self.output_dir, 'quick_throughput.png')
+            plt.savefig(out_path, dpi=200)
+            plt.close()
+            self.logger.info(f"Quick chart saved to: {out_path}")
     
     def _save_results(self, results: Dict, filename: str):
         """Save results to file."""

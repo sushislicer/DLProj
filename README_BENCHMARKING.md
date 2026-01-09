@@ -67,6 +67,39 @@ chmod +x scripts/run_fast_benchmark.sh
  RUN_BASELINES=true ./scripts/run_fast_benchmark.sh
 ```
 
+### Bigger sample sizes for 4×5090 (recommended for non-trivial accuracy)
+
+The default [`configs/benchmark_config.yaml`](configs/benchmark_config.yaml:1) is tuned for speed
+and can be too small (e.g., `num_samples_14b: 5`) leading to noisy 0% results.
+
+For 4× RTX 5090 32GB, use [`configs/benchmark_config_4x5090.yaml`](configs/benchmark_config_4x5090.yaml:1):
+
+```bash
+cd ~/DLProj
+python scripts/run_benchmarks.py \
+  --config configs/benchmark_config_4x5090.yaml \
+  --num_gpus 4 \
+  --time_budget 4 \
+  --quantize \
+  --run_baselines
+```
+
+### Check whether FlashAttention is installed
+
+Run:
+
+```bash
+cd ~/DLProj
+python scripts/check_env.py
+```
+
+The runner will try FlashAttention2 automatically and fall back if unavailable.
+
+If you see a log like:
+"FlashAttention2 ... seems to be not installed", that is expected on a fresh
+environment. Benchmarks will still run (slightly slower). To enable FA2, install
+`flash-attn` in your environment (CUDA toolchain required).
+
 ### Manual Quick Start
 
 ```bash
