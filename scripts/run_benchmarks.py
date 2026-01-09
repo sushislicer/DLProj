@@ -1,0 +1,821 @@
+"""
+Main benchmarking script for Qwen2.5 models on difficult benchmarks.
+Supports multiple model sizes and multi-GPU execution (1-8 GPUs).
+Includes 4-bit quantization support for faster execution.
+Features:
+- Debug mode with small sample datasets for quick validation
+- Baseline comparison (4-bit quantization, 4-bit LoRA)
+- Optimized execution times for larger models (14B, 32B, 72B)
+"""
+
+import os
+import sys
+import argparse
+import json
+import time
+import logging
+from pathlib import Path
+from datetime import datetime
+from typing import Dict, List, Any, Optional, Tuple
+import yaml
+import torch
+import numpy as np
+from tqdm import tqdm
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from accelerate import infer_auto_device_map, dispatch_model
+
+# Add project root to path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.helpers import setup_logging, ensure_dir, format_time
+from utils.memory_tracker import MemoryTracker
+
+
+class BenchmarkRunner:
+    """Main benchmark runner for Qwen2.5 models."""
+    
+    def __init__(self, config_path: str, logger: logging.Logger):
+        """
+        Initialize benchmark runner.
+        
+        Args:
+            config_path: Path to benchmark configuration file
+            logger: Logger instance
+        """
+        self.logger = logger
+        self.config = self._load_config(config_path)
+        self.device_map = self._setup_device_map()
+        self.memory_tracker = MemoryTracker(
+            log_dir=self.config['logging']['log_dir'],
+            log_file='benchmark_memory.log'
+        )
+        
+        # Setup output directories
+        self.output_dir = self._setup_output_dir()
+        ensure_dir(self.output_dir)
+        
+        # Track results
+        self.results = {
+            'config': self.config,
+            'system_info': self._get_system_info(),
+            'benchmarks': {}
+        }
+        
+        self.logger.info("=" * 80)
+        self.logger.info("QWEN2.5 BENCHMARK RUNNER")
+        self.logger.info("=" * 80)
+        self.logger.info(f"Configuration loaded from: {config_path}")
+        self.logger.info(f"Output directory: {self.output_dir}")
+        self.logger.info(f"Number of GPUs: {torch.cuda.device_count()}")
+        self.logger.info("=" * 80)
+    
+    def _load_config(self, config_path: str) -> Dict:
+        """Load configuration from YAML file."""
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        return config
+    
+    def _setup_device_map(self) -> Dict:
+        """Setup device map for multi-GPU support (1-8 GPUs)."""
+        requested_gpus = int(self.config['gpu']['num_gpus'])
+        device_map_strategy = self.config['gpu']['device_map']
+
+        available_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 0
+        if requested_gpus > 1 and available_gpus > 0 and requested_gpus > available_gpus:
+            self.logger.warning(
+                f"Requested gpu.num_gpus={requested_gpus} but only {available_gpus} GPUs are visible. "
+                f"Clamping to {available_gpus}."
+            )
+            requested_gpus = available_gpus
+            self.config['gpu']['num_gpus'] = requested_gpus
+
+        num_gpus = requested_gpus
+        
+        if num_gpus > 1:
+            self.logger.info(f"Setting up multi-GPU configuration with {num_gpus} GPUs")
+            
+            # Configure max memory per GPU
+            max_memory = {}
+            for i in range(num_gpus):
+                gpu_memory = torch.cuda.get_device_properties(i).total_memory
+                # Use 90% of available memory
+                max_memory[i] = f"{int(gpu_memory * 0.9 / 1024**3)}GB"
+            
+            self.logger.info(f"Max memory per GPU: {max_memory}")
+            
+            return {
+                'device_map': device_map_strategy,
+                'max_memory': max_memory,
+                'offload_folder': self.config['advanced']['device_map_options']['offload_folder']
+            }
+        else:
+            return {'device_map': 'auto'}
+    
+    def _setup_quantization(self) -> Optional[BitsAndBytesConfig]:
+        """Setup 4-bit quantization configuration."""
+        if not self.config['gpu']['quantization']['enabled']:
+            return None
+        
+        quant_config = self.config['gpu']['quantization']
+        bits = quant_config['bits']
+        
+        self.logger.info(f"Setting up {bits}-bit quantization")
+        
+        # Determine compute dtype
+        compute_dtype_str = quant_config.get('compute_dtype', 'float16')
+        if compute_dtype_str == 'float16':
+            compute_dtype = torch.float16
+        elif compute_dtype_str == 'bfloat16':
+            compute_dtype = torch.bfloat16
+        else:
+            compute_dtype = torch.float32
+        
+        # Create BitsAndBytesConfig
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=(bits == 4),
+            load_in_8bit=(bits == 8),
+            bnb_4bit_compute_dtype=compute_dtype,
+            bnb_4bit_use_double_quant=quant_config.get('double_quant', True),
+            bnb_4bit_quant_type=quant_config.get('quant_type', 'nf4')
+        )
+        
+        self.logger.info(f"Quantization config: {bits}-bit, {quant_config.get('quant_type', 'nf4')}, double_quant={quant_config.get('double_quant', True)}")
+        
+        return bnb_config
+    
+    def _setup_output_dir(self) -> str:
+        """Setup output directory with timestamp."""
+        base_dir = self.config['output']['base_dir']
+        include_timestamp = self.config['output']['include_timestamp']
+        
+        if include_timestamp:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_dir = os.path.join(base_dir, f"benchmark_{timestamp}")
+        else:
+            output_dir = base_dir
+        
+        ensure_dir(output_dir)
+        return output_dir
+    
+    def _get_system_info(self) -> Dict:
+        """Get system information."""
+        info = {
+            'timestamp': datetime.now().isoformat(),
+            'python_version': sys.version,
+            'torch_version': torch.__version__,
+            'cuda_version': torch.version.cuda,
+            'cuda_available': torch.cuda.is_available(),
+            'num_gpus': torch.cuda.device_count(),
+            'gpu_info': []
+        }
+        
+        for i in range(torch.cuda.device_count()):
+            props = torch.cuda.get_device_properties(i)
+            info['gpu_info'].append({
+                'device_id': i,
+                'name': props.name,
+                'total_memory': f"{props.total_memory / 1024**3:.2f} GB",
+                'compute_capability': f"{props.major}.{props.minor}"
+            })
+        
+        return info
+    
+    def load_model(self, model_config: Dict) -> tuple:
+        """
+        Load model and tokenizer with quantization support.
+        
+        Args:
+            model_config: Model configuration dictionary
+        
+        Returns:
+            Tuple of (model, tokenizer)
+        """
+        model_name = model_config['name']
+        model_size = model_config['size']
+        
+        self.logger.info("=" * 80)
+        self.logger.info(f"Loading model: {model_name} ({model_size})")
+        self.logger.info("=" * 80)
+        
+        self.memory_tracker.log_memory(f"load_model_{model_size}", "Starting model load")
+        start_time = time.time()
+        
+        # Quantization can be overridden per-model (e.g., baselines).
+        # Values: "none" | "4bit" | "8bit" (default uses global config)
+        quant_override = str(model_config.get('quantization', '')).lower().strip() if model_config.get('quantization') is not None else ''
+        original_quant_enabled = bool(self.config['gpu']['quantization']['enabled'])
+        original_bits = int(self.config['gpu']['quantization'].get('bits', 4))
+
+        if quant_override in ("none", "fp16", "fp32"):
+            self.config['gpu']['quantization']['enabled'] = False
+        elif quant_override in ("4bit", "4", "int4"):
+            self.config['gpu']['quantization']['enabled'] = True
+            self.config['gpu']['quantization']['bits'] = 4
+        elif quant_override in ("8bit", "8", "int8"):
+            self.config['gpu']['quantization']['enabled'] = True
+            self.config['gpu']['quantization']['bits'] = 8
+
+        # Setup quantization (after overrides)
+        quantization_config = self._setup_quantization()
+        
+        # Determine torch dtype (only used if not quantizing)
+        dtype_str = self.config['gpu']['torch_dtype']
+        if dtype_str == 'float16':
+            torch_dtype = torch.float16
+        elif dtype_str == 'bfloat16':
+            torch_dtype = torch.bfloat16
+        else:
+            torch_dtype = torch.float32
+        
+        # Load tokenizer
+        self.logger.info("Loading tokenizer...")
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_name,
+            trust_remote_code=self.config['gpu']['trust_remote_code'],
+            cache_dir=self.config['evaluation']['cache_dir']
+        )
+        
+        # Set pad token if not exists
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        
+        # Load model with device map and quantization
+        self.logger.info("Loading model...")
+        model_kwargs = {
+            'device_map': self.device_map['device_map'],
+            'trust_remote_code': self.config['gpu']['trust_remote_code'],
+            'low_cpu_mem_usage': self.config['advanced']['low_cpu_mem_usage'],
+            'cache_dir': self.config['evaluation']['cache_dir'],
+        }
+
+        # Prefer FlashAttention2 if enabled. If unavailable, fall back.
+        # This must be set at load time (`attn_implementation`).
+        if bool(self.config['advanced'].get('use_flash_attention', False)) or bool(self.config['gpu']['quantization'].get('use_flash_attention', False)):
+            model_kwargs['attn_implementation'] = 'flash_attention_2'
+        
+        # Add quantization config if enabled
+        if quantization_config is not None:
+            model_kwargs['quantization_config'] = quantization_config
+            self.logger.info("Loading model with 4-bit quantization")
+        else:
+            model_kwargs['torch_dtype'] = torch_dtype
+        
+        # Add max_memory if specified
+        if 'max_memory' in self.device_map:
+            model_kwargs['max_memory'] = self.device_map['max_memory']
+        
+        try:
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                **model_kwargs
+            )
+        except Exception as e:
+            # Common failure mode: flash-attn not installed / unsupported attention.
+            if 'attn_implementation' in model_kwargs:
+                self.logger.warning(f"Model load failed with attn_implementation=flash_attention_2; retrying without it. Error: {e}")
+                model_kwargs.pop('attn_implementation', None)
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_name,
+                    **model_kwargs
+                )
+            else:
+                raise
+
+        # Optional: load adapters (LoRA/PiSSA) on top of the base model.
+        adapter_path = model_config.get('adapter_path')
+        if adapter_path:
+            if not os.path.exists(adapter_path):
+                raise FileNotFoundError(
+                    f"adapter_path does not exist: {adapter_path}. "
+                    "For the 4-bit QLoRA baseline, set baselines.quantization_4bit_lora.adapter_path "
+                    "to a valid PEFT adapter directory."
+                )
+            try:
+                from peft import PeftModel
+            except Exception as e:
+                raise ImportError("peft is required to load adapters. Install `peft`.\n" + str(e))
+
+            self.logger.info(f"Loading adapters from: {adapter_path}")
+            model = PeftModel.from_pretrained(model, adapter_path, is_trainable=False)
+            model.eval()
+        
+        # Ensure eval mode for benchmarking.
+        model.eval()
+        
+        # Inference optimizations.
+        # NOTE: Do *not* enable gradient checkpointing during inference; it slows
+        # generation and can disable KV cache.
+        try:
+            if hasattr(model.config, 'use_cache'):
+                model.config.use_cache = True
+        except Exception:
+            pass
+
+        # Restore global quantization config (avoid leaking baseline overrides).
+        self.config['gpu']['quantization']['enabled'] = original_quant_enabled
+        self.config['gpu']['quantization']['bits'] = original_bits
+        
+        elapsed_time = time.time() - start_time
+        self.logger.info(f"Model loaded in {format_time(elapsed_time)}")
+        self.memory_tracker.log_memory(f"load_model_{model_size}", f"Model loaded in {format_time(elapsed_time)}")
+        
+        return model, tokenizer
+
+    def _expand_model_variants(self, model_config: Dict) -> List[Dict]:
+        """Expand a base model config into runnable variants.
+
+        We keep this *opt-in* via CLI (`--run_baselines`) to avoid turning the
+        default 2-4h sweep into a 6-12h sweep.
+        """
+        variants = []
+
+        # Main run config.
+        main_cfg = dict(model_config)
+        main_cfg.setdefault('variant', 'main')
+        variants.append(main_cfg)
+
+        # Optional baselines.
+        baselines_cfg = self.config.get('baselines', {})
+        if not getattr(self, 'run_baselines', False):
+            return variants
+
+        def _mk_variant(base: Dict, variant_id: str, bcfg: Dict) -> Dict:
+            out = dict(base)
+            out['variant'] = variant_id
+            # Apply baseline overrides
+            if 'use_adapters' in bcfg and not bool(bcfg['use_adapters']):
+                out.pop('adapter_path', None)
+            if bool(bcfg.get('use_adapters', False)):
+                out['adapter_path'] = bcfg.get('adapter_path')
+            if 'quantization' in bcfg:
+                out['quantization'] = bcfg['quantization']
+            return out
+
+        # Native 4-bit quant baseline (no adapters)
+        b1 = baselines_cfg.get('quantization_4bit', {})
+        if b1.get('enabled', False):
+            variants.append(_mk_variant(model_config, 'baseline_4bit', b1))
+
+        # 4-bit QLoRA baseline (4-bit base + adapters)
+        b2 = baselines_cfg.get('quantization_4bit_lora', {})
+        if b2.get('enabled', False):
+            variants.append(_mk_variant(model_config, 'baseline_4bit_qlora', b2))
+
+        return variants
+    
+    def run_benchmark(
+        self,
+        model,
+        tokenizer,
+        model_config: Dict,
+        benchmark_name: str,
+        benchmark_config: Dict
+    ) -> Dict:
+        """
+        Run a specific benchmark.
+        
+        Args:
+            model: Loaded model
+            tokenizer: Loaded tokenizer
+            model_config: Model configuration
+            benchmark_name: Name of the benchmark
+            benchmark_config: Benchmark configuration
+        
+        Returns:
+            Dictionary with benchmark results
+        """
+        self.logger.info("=" * 80)
+        self.logger.info(f"Running benchmark: {benchmark_name}")
+        self.logger.info(f"Model: {model_config['name']} ({model_config['size']})")
+        self.logger.info("=" * 80)
+        
+        # Import the appropriate benchmark runner
+        if benchmark_name == 'aime':
+            from benchmarks.aime_benchmark import AIMEBenchmark
+            benchmark = AIMEBenchmark(benchmark_config, self.logger)
+        elif benchmark_name == 'math':
+            from benchmarks.math_benchmark import MATHBenchmark
+            benchmark = MATHBenchmark(benchmark_config, self.logger)
+        elif benchmark_name == 'livecodebench':
+            from benchmarks.livecodebench_benchmark import LiveCodeBenchBenchmark
+            benchmark = LiveCodeBenchBenchmark(benchmark_config, self.logger)
+        elif benchmark_name == 'swe_bench':
+            from benchmarks.swe_bench_benchmark import SWEBenchBenchmark
+            benchmark = SWEBenchBenchmark(benchmark_config, self.logger)
+        elif benchmark_name == 'gpqa':
+            from benchmarks.gpqa_benchmark import GPQABenchmark
+            benchmark = GPQABenchmark(benchmark_config, self.logger)
+        else:
+            raise ValueError(f"Unknown benchmark: {benchmark_name}")
+        
+        # Run benchmark
+        self.memory_tracker.log_memory(f"benchmark_{benchmark_name}", "Starting benchmark")
+        start_time = time.time()
+        
+        # Log memory before benchmark
+        gpu_memory = self.memory_tracker.get_gpu_memory()
+        self.logger.info(f"GPU Memory before {benchmark_name}: {gpu_memory['allocated_mb']:.2f}MB / {gpu_memory['total_mb']:.2f}MB ({gpu_memory['percent_used']:.1f}%)")
+        
+        results = benchmark.run(model, tokenizer, model_config)
+        
+        elapsed_time = time.time() - start_time
+        results['elapsed_time'] = elapsed_time
+        results['formatted_time'] = format_time(elapsed_time)
+        
+        # Log memory after benchmark
+        gpu_memory_after = self.memory_tracker.get_gpu_memory()
+        self.logger.info(f"GPU Memory after {benchmark_name}: {gpu_memory_after['allocated_mb']:.2f}MB / {gpu_memory_after['total_mb']:.2f}MB ({gpu_memory_after['percent_used']:.1f}%)")
+        
+        # Log inference speed metrics
+        if 'metrics' in results:
+            metrics = results['metrics']
+            self.logger.info(f"Inference Speed Metrics for {benchmark_name}:")
+            if 'avg_latency' in metrics:
+                self.logger.info(f"  Average Latency: {metrics['avg_latency']:.4f}s per sample")
+            if 'throughput' in metrics:
+                self.logger.info(f"  Throughput: {metrics['throughput']:.2f} samples/second")
+            if 'total_latency' in metrics:
+                self.logger.info(f"  Total Latency: {metrics['total_latency']:.2f}s")
+        
+        self.logger.info(f"Benchmark {benchmark_name} completed in {format_time(elapsed_time)}")
+        self.memory_tracker.log_memory(f"benchmark_{benchmark_name}", f"Completed in {format_time(elapsed_time)}")
+        
+        return results
+    
+    def run_all_benchmarks_for_model(self, model_config: Dict) -> Dict:
+        """
+        Run all enabled benchmarks for a specific model.
+        
+        Args:
+            model_config: Model configuration
+        
+        Returns:
+            Dictionary with all benchmark results for the model
+        """
+        model_name = model_config['name']
+        model_size = model_config['size']
+        variant = model_config.get('variant', 'main')
+        
+        self.logger.info("\n" + "=" * 80)
+        self.logger.info(f"BENCHMARKING MODEL: {model_name} ({model_size}) [{variant}]")
+        self.logger.info("=" * 80)
+        
+        # Apply 14B/72B-specific optimizations before loading model
+        if model_size in ["14B", "72B"] and model_config.get('aggressive_optimization', False):
+            self.logger.info(f"Applying aggressive optimizations for {model_size} model")
+            # Increase GPU memory utilization for 14B/72B
+            if 'max_memory' in self.device_map:
+                for i in self.device_map['max_memory']:
+                    # Use 95% instead of 90% for 14B/72B
+                    current_val = int(self.device_map['max_memory'][i].replace('GB', ''))
+                    self.device_map['max_memory'][i] = f"{int(current_val * 1.056)}GB"  # 95/90 = 1.056
+                self.logger.info(f"Optimized GPU memory for {model_size}: {self.device_map['max_memory']}")
+        
+        # Load model
+        model, tokenizer = self.load_model(model_config)
+        
+        # Run all enabled benchmarks
+        model_results = {
+            'model_name': model_name,
+            'model_size': model_size,
+            'variant': variant,
+            'benchmarks': {}
+        }
+        
+        for benchmark_name, benchmark_config in self.config['benchmarks'].items():
+            if not benchmark_config.get('enabled', False):
+                self.logger.info(f"Skipping disabled benchmark: {benchmark_name}")
+                continue
+            
+            # Check if this benchmark should be skipped for this model
+            skip_benchmarks = model_config.get('skip_benchmarks', [])
+            if benchmark_name in skip_benchmarks:
+                self.logger.info(f"Skipping {benchmark_name} for {model_size} (in skip list)")
+                continue
+            
+            # Adjust num_samples for specific models
+            adjusted_config = benchmark_config.copy()
+
+            # Debug mode: use debug_samples and smaller generation for fast iteration.
+            debug_cfg = self.config.get('debug', {})
+            if debug_cfg.get('enabled', False) and debug_cfg.get('use_debug_samples', True):
+                dbg_n = benchmark_config.get('debug_samples', debug_cfg.get('debug_sample_size', 3))
+                adjusted_config['num_samples'] = int(dbg_n)
+                # Reduce generation in debug runs.
+                if 'max_new_tokens' in adjusted_config:
+                    adjusted_config['max_new_tokens'] = int(min(adjusted_config['max_new_tokens'], 64))
+                if 'timeout' in adjusted_config:
+                    adjusted_config['timeout'] = int(min(adjusted_config['timeout'], 30))
+            if model_size == "72B" and f"num_samples_72b" in benchmark_config:
+                adjusted_config['num_samples'] = benchmark_config['num_samples_72b']
+                self.logger.info(f"Using reduced sample count for 72B model: {adjusted_config['num_samples']}")
+            elif model_size == "14B" and f"num_samples_14b" in benchmark_config:
+                adjusted_config['num_samples'] = benchmark_config['num_samples_14b']
+                self.logger.info(f"Using reduced sample count for 14B model: {adjusted_config['num_samples']}")
+            
+            # Apply 14B/72B-specific optimizations
+            if model_size in ["14B", "72B"]:
+                if model_config.get('use_dynamic_batching', False):
+                    self.logger.info(f"Enabling dynamic batching for {model_size} model")
+                if model_config.get('early_stopping', False):
+                    self.logger.info(f"Enabling early stopping for {model_size} model")
+                if model_config.get('optimize_generation', False):
+                    self.logger.info(f"Using optimized generation parameters for {model_size} model")
+                
+                # Apply aggressive optimizations for LiveCodeBench
+                if benchmark_name == "livecodebench":
+                    self.logger.info(f"Applying aggressive optimizations for LiveCodeBench on {model_size}")
+                    # Reduce timeout and test cases for 14B/72B
+                    if model_size == "72B" and f"timeout_72b" in benchmark_config:
+                        adjusted_config['timeout'] = benchmark_config['timeout_72b']
+                    else:
+                        adjusted_config['timeout'] = benchmark_config.get('timeout', 120)
+                    
+                    if model_size == "72B" and f"num_test_cases_72b" in benchmark_config:
+                        adjusted_config['num_test_cases'] = benchmark_config['num_test_cases_72b']
+                    else:
+                        adjusted_config['num_test_cases'] = benchmark_config.get('num_test_cases', 5)
+                    
+                    self.logger.info(f"LiveCodeBench {model_size}: timeout={adjusted_config['timeout']}s, test_cases={adjusted_config['num_test_cases']}")
+            
+            try:
+                results = self.run_benchmark(
+                    model, tokenizer, model_config,
+                    benchmark_name, adjusted_config
+                )
+                model_results['benchmarks'][benchmark_name] = results
+                
+                # Save intermediate results
+                if self.config['evaluation']['save_intermediate_results']:
+                    self._save_results(model_results, f"intermediate_{model_size}_{benchmark_name}")
+            
+            except Exception as e:
+                self.logger.error(f"Error running benchmark {benchmark_name}: {e}")
+                import traceback
+                traceback.print_exc()
+                model_results['benchmarks'][benchmark_name] = {
+                    'error': str(e),
+                    'status': 'failed'
+                }
+        
+        # Cleanup
+        del model
+        del tokenizer
+        torch.cuda.empty_cache()
+        
+        return model_results
+    
+    def run_all_models(self, model_sizes: Optional[List[str]] = None):
+        """
+        Run benchmarks for all models or specific model sizes.
+        Supports time budget and priority-based execution.
+        
+        Args:
+            model_sizes: Optional list of model sizes to run (e.g., ['3B', '7B'])
+        """
+        self.memory_tracker.start_tracking()
+        total_start_time = time.time()
+        
+        # Check time budget
+        max_execution_time = self.config['execution'].get('max_execution_time', 4) * 3600  # Convert to seconds
+        enable_time_budget = self.config['execution'].get('enable_time_budget', True)
+        
+        # Filter models by size if specified
+        base_models_to_run = self.config['models']
+        if model_sizes:
+            base_models_to_run = [m for m in base_models_to_run if m['size'] in model_sizes]
+            self.logger.info(f"Running benchmarks for model sizes: {model_sizes}")
+        
+        # Sort models by priority (smaller models first)
+        model_priority = self.config['execution'].get('model_priority', [])
+        base_models_to_run.sort(key=lambda m: model_priority.index(m['size']) if m['size'] in model_priority else len(model_priority))
+
+        # Expand into variants (main + optional baselines)
+        models_to_run: List[Dict] = []
+        for m in base_models_to_run:
+            models_to_run.extend(self._expand_model_variants(m))
+        
+        # Run benchmarks for each model
+        for model_config in models_to_run:
+            # Check time budget
+            if enable_time_budget:
+                elapsed_time = time.time() - total_start_time
+                remaining_time = max_execution_time - elapsed_time
+                
+                if remaining_time <= 0:
+                    self.logger.warning(f"Time budget exceeded, skipping remaining models")
+                    break
+                
+                self.logger.info(f"Time remaining: {remaining_time/60:.1f} minutes")
+            
+            try:
+                model_results = self.run_all_benchmarks_for_model(model_config)
+                key = model_config['size']
+                variant = model_config.get('variant', 'main')
+                if variant != 'main':
+                    key = f"{key}__{variant}"
+                self.results['benchmarks'][key] = model_results
+            except Exception as e:
+                self.logger.error(f"Error benchmarking model {model_config['name']}: {e}")
+                import traceback
+                traceback.print_exc()
+                self.results['benchmarks'][model_config['size']] = {
+                    'error': str(e),
+                    'status': 'failed'
+                }
+        
+        total_elapsed_time = time.time() - total_start_time
+        self.results['total_elapsed_time'] = total_elapsed_time
+        self.results['total_formatted_time'] = format_time(total_elapsed_time)
+        
+        # Save final results
+        self._save_results(self.results, 'final_results')
+        
+        # Stop memory tracking
+        self.memory_tracker.stop_tracking()
+        self.memory_tracker.print_summary()
+        
+        # Print summary
+        self._print_summary()
+    
+    def _save_results(self, results: Dict, filename: str):
+        """Save results to file."""
+        output_format = self.config['output']['format']
+        
+        if output_format in ['json', 'both']:
+            json_path = os.path.join(self.output_dir, f"{filename}.json")
+            with open(json_path, 'w') as f:
+                json.dump(results, f, indent=2)
+            self.logger.info(f"Results saved to: {json_path}")
+        
+        if output_format in ['csv', 'both']:
+            csv_path = os.path.join(self.output_dir, f"{filename}.csv")
+            self._save_results_csv(results, csv_path)
+            self.logger.info(f"Results saved to: {csv_path}")
+    
+    def _save_results_csv(self, results: Dict, csv_path: str):
+        """Save results to CSV format."""
+        import csv
+        
+        with open(csv_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            
+            # Write header
+            writer.writerow(['Model Size', 'Benchmark', 'Metric', 'Value'])
+            
+            # Write data
+            for model_size, model_data in results.get('benchmarks', {}).items():
+                if 'error' in model_data:
+                    writer.writerow([model_size, 'ALL', 'ERROR', model_data['error']])
+                    continue
+                
+                for benchmark_name, benchmark_data in model_data.get('benchmarks', {}).items():
+                    if 'error' in benchmark_data:
+                        writer.writerow([model_size, benchmark_name, 'ERROR', benchmark_data['error']])
+                        continue
+                    
+                    for metric_name, metric_value in benchmark_data.get('metrics', {}).items():
+                        writer.writerow([model_size, benchmark_name, metric_name, metric_value])
+    
+    def _print_summary(self):
+        """Print benchmark summary."""
+        self.logger.info("\n" + "=" * 80)
+        self.logger.info("BENCHMARK SUMMARY")
+        self.logger.info("=" * 80)
+        
+        for model_size, model_data in self.results['benchmarks'].items():
+            if 'error' in model_data:
+                self.logger.info(f"\n{model_size}: FAILED - {model_data['error']}")
+                continue
+            
+            self.logger.info(f"\n{model_size}:")
+            for benchmark_name, benchmark_data in model_data.get('benchmarks', {}).items():
+                if 'error' in benchmark_data:
+                    self.logger.info(f"  {benchmark_name}: FAILED - {benchmark_data['error']}")
+                    continue
+                
+                self.logger.info(f"  {benchmark_name}:")
+                for metric_name, metric_value in benchmark_data.get('metrics', {}).items():
+                    self.logger.info(f"    {metric_name}: {metric_value}")
+        
+        self.logger.info("\n" + "=" * 80)
+        self.logger.info(f"Total time: {self.results['total_formatted_time']}")
+        self.logger.info(f"Results saved to: {self.output_dir}")
+        self.logger.info("=" * 80)
+
+
+def main():
+    """Main execution function."""
+    parser = argparse.ArgumentParser(
+        description="Benchmark Qwen2.5 models on difficult benchmarks"
+    )
+    parser.add_argument(
+        '--config',
+        type=str,
+        default='configs/benchmark_config.yaml',
+        help='Path to benchmark configuration file'
+    )
+    parser.add_argument(
+        '--model_sizes',
+        type=str,
+        nargs='+',
+        help='Model sizes to benchmark (e.g., 0.5B 7B 32B)'
+    )
+    parser.add_argument(
+        '--benchmarks',
+        type=str,
+        nargs='+',
+        help='Specific benchmarks to run (e.g., aime math gpqa)'
+    )
+    parser.add_argument(
+        '--output_dir',
+        type=str,
+        help='Override output directory'
+    )
+    parser.add_argument(
+        '--num_gpus',
+        type=int,
+        help='Number of GPUs to use (overrides config)'
+    )
+    parser.add_argument(
+        '--quantize',
+        action='store_true',
+        help='Enable 4-bit quantization'
+    )
+    parser.add_argument(
+        '--no_quantize',
+        action='store_true',
+        help='Disable quantization'
+    )
+    parser.add_argument(
+        '--time_budget',
+        type=float,
+        help='Time budget in hours'
+    )
+
+    parser.add_argument(
+        '--debug',
+        action='store_true',
+        help='Enable debug mode (uses benchmark debug_samples and can skip slow parts)'
+    )
+
+    parser.add_argument(
+        '--run_baselines',
+        action='store_true',
+        help='Also run baseline variants (native 4-bit quant, 4-bit QLoRA) as configured in the YAML'
+    )
+    
+    args = parser.parse_args()
+    
+    # Setup logging
+    logger = setup_logging(log_dir='logs/benchmark', log_file='benchmark.log', logger_name='benchmark')
+    
+    # Create benchmark runner
+    runner = BenchmarkRunner(args.config, logger)
+
+    # Baseline execution is opt-in.
+    runner.run_baselines = bool(args.run_baselines)
+
+    # Enable debug mode
+    if args.debug:
+        runner.config.setdefault('debug', {})
+        runner.config['debug']['enabled'] = True
+        runner.config['debug'].setdefault('use_debug_samples', True)
+        logger.info("Debug mode enabled")
+    
+    # Override output directory if specified
+    if args.output_dir:
+        runner.output_dir = args.output_dir
+        ensure_dir(runner.output_dir)
+    
+    # Override number of GPUs if specified
+    if args.num_gpus:
+        runner.config['gpu']['num_gpus'] = args.num_gpus
+        logger.info(f"Overriding GPU count to: {args.num_gpus}")
+    
+    # Override quantization settings if specified
+    if args.quantize:
+        runner.config['gpu']['quantization']['enabled'] = True
+        logger.info("Enabling 4-bit quantization")
+    elif args.no_quantize:
+        runner.config['gpu']['quantization']['enabled'] = False
+        logger.info("Disabling quantization")
+    
+    # Override time budget if specified
+    if args.time_budget:
+        runner.config['execution']['max_execution_time'] = args.time_budget
+        logger.info(f"Setting time budget to: {args.time_budget} hours")
+    
+    # Disable benchmarks not specified
+    if args.benchmarks:
+        for benchmark_name in runner.config['benchmarks']:
+            if benchmark_name not in args.benchmarks:
+                runner.config['benchmarks'][benchmark_name]['enabled'] = False
+    
+    # Run benchmarks
+    runner.run_all_models(model_sizes=args.model_sizes)
+    
+    logger.info("Benchmarking completed successfully")
+
+
+if __name__ == '__main__':
+    main()

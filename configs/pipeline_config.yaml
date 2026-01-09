@@ -1,0 +1,82 @@
+# Qwen2.5 Quantization Pipeline Configuration
+# Pipeline: PiSSA -> SpinQuant -> GaLore
+
+# Model Configuration
+model_name: "Qwen/Qwen2.5-7B-Instruct"
+
+# Output Configuration
+output_dir: "outputs"
+log_dir: "logs"
+
+# Training Configuration
+seed: 42
+num_epochs: 3
+batch_size: 4
+gradient_accumulation_steps: 4
+warmup_steps: 100
+logging_steps: 10
+save_steps: 500
+save_total_limit: 3
+
+# Dataset Configuration
+dataset: "c4"
+dataset_split: "train"
+max_samples: 10000
+max_length: 512
+
+# PiSSA Configuration
+pissa:
+  rank: 64
+  alpha: 128
+  dropout: 0.05
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+  bias: "none"
+
+# SpinQuant Configuration
+spinquant:
+  bits: 8  # Options: 4, 8
+  double_quant: true
+  quant_type: "nf4"  # Options: "nf4", "fp4"
+  group_size: 128
+  symmetric: false
+  backend: "blockwise_givens"
+  block_size: 64
+  num_steps: 50
+  lr: 0.05
+  num_sweeps: 2
+  max_layers: 16
+  use_bnb_quantization: true
+  use_activation_objective: true
+  calibration_vectors_per_layer: 512
+  keep_fp16_modules:
+    - "input_embeddings"
+    - "output_embeddings"
+
+# GaLore Configuration
+galore:
+  rank: 128
+  learning_rate: 1.0e-4
+  weight_decay: 0.01
+  update_proj_gap: 200
+  scale: 0.25
+  proj_type: "std"  # Options: "std", "reverse_std", "full"
+
+# Optional: post-quant adapter distillation
+distill:
+  enabled: false
+  alpha: 0.5
+  temperature: 2.0
+
+# GaLore-like gradient projection (projection-space updates)
+projection:
+  enabled: true
+  rank: 64
+  update_gap: 200
+  drift_threshold: 0.35

@@ -1,0 +1,29 @@
+# PiSSA (Principal Singular values and Singular Vectors Adaptation) Configuration
+
+# Model Configuration
+model_name: "Qwen/Qwen2.5-7B-Instruct"
+
+# Output Configuration
+output_dir: "outputs/adapters"
+
+# PiSSA Parameters
+rank: 64
+alpha: 128
+dropout: 0.05
+
+# Target Modules for LoRA
+target_modules:
+  - "q_proj"
+  - "k_proj"
+  - "v_proj"
+  - "o_proj"
+  - "gate_proj"
+  - "up_proj"
+  - "down_proj"
+
+# Bias Configuration
+bias: "none"  # Options: "none", "all", "lora_only"
+
+# Training Configuration
+seed: 42
+gradient_checkpointing: true

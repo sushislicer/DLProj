@@ -1,0 +1,47 @@
+# SpinQuant Configuration
+
+# Input Model Configuration
+residual_model_path: "outputs/residual_model"
+
+# Output Configuration
+output_dir: "outputs/quantized_models"
+
+# Quantization Parameters
+bits: 8  # Options: 4, 8
+double_quant: true
+quant_type: "nf4"  # Options: "nf4", "fp4"
+group_size: 128
+symmetric: false
+
+# Backend
+# This repo defaults to a lightweight SpinQuant-style backend (blockwise Givens
+# rotations + weight-domain fake-quant objective), rather than vendoring the full
+# SpinQuant implementation.
+backend: "blockwise_givens"  # Options: blockwise_givens
+
+# SpinQuant-lite rotation optimization knobs
+block_size: 64
+num_steps: 50
+lr: 0.05
+num_sweeps: 2
+max_layers: 16
+use_activation_objective: true
+calibration_vectors_per_layer: 512
+
+# Mixed precision knobs for bnb reload
+# Keeping embeddings/lm_head in fp16 can improve quality on hard tasks.
+keep_fp16_modules:
+  - "input_embeddings"
+  - "output_embeddings"
+
+# If true, after learning rotations we reload the model with bitsandbytes 4/8-bit
+# quantized modules to reduce weight memory and get closer to the benchmarking
+# runner's VRAM behavior.
+use_bnb_quantization: true
+
+# Calibration Configuration
+calibration_samples: 10
+calibration_max_length: 512
+
+# Training Configuration
+seed: 42

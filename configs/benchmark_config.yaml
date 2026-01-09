@@ -1,0 +1,351 @@
+# Benchmarking Configuration for Qwen2.5 Models
+# Supports 4/8 GPU clusters with 4-bit quantization for fast execution
+
+# Model configurations - 4 representative models
+models:
+  # Small model (fast, good for testing)
+  - name: "Qwen/Qwen2.5-0.5B-Instruct"
+    size: "0.5B"
+    max_length: 2048
+    batch_size: 16
+    max_batch_size: 32
+    min_batch_size: 8
+    quantization: "4bit"  # 4-bit quantization for base model only
+    skip_benchmarks: []  # Don't skip any benchmarks
+    reduced_samples: false
+  
+  # Medium model (balanced performance)
+  - name: "Qwen/Qwen2.5-7B-Instruct"
+    size: "7B"
+    max_length: 4096
+    batch_size: 4
+    max_batch_size: 8
+    min_batch_size: 2
+    quantization: "4bit"
+    skip_benchmarks: []
+    reduced_samples: false
+  
+  # Large model (high performance) - Optimized for speed
+  - name: "Qwen/Qwen2.5-14B-Instruct"
+    size: "14B"
+    max_length: 4096
+    batch_size: 4  # Increased from 2 for better throughput
+    max_batch_size: 8  # Increased from 4
+    min_batch_size: 2  # Increased from 1
+    quantization: "4bit"
+    skip_benchmarks: ["swe_bench"]  # Skip SWE-Bench (slower), keep LiveCodeBench with optimization
+    reduced_samples: true  # Use reduced sample sizes
+    debug_samples: 3  # Small sample for debugging mode
+    # Optimization settings for 14B
+    use_dynamic_batching: true  # Enable dynamic batching based on input length
+    early_stopping: true  # Enable early stopping for math benchmarks
+    optimize_generation: true  # Use optimized generation parameters
+    aggressive_optimization: true  # Enable aggressive optimizations for 14B
+  
+  # Very large model (best performance) - Optimized for speed
+  - name: "Qwen/Qwen2.5-72B-Instruct"
+    size: "72B"
+    max_length: 4096
+    batch_size: 2  # Increased from 1 for better throughput
+    max_batch_size: 4  # Increased from 1
+    min_batch_size: 1
+    quantization: "4bit"
+    # For a 4h wall-clock budget, LiveCodeBench is often the first to blow up.
+    # We skip it by default for 72B to keep total runtime predictable.
+    skip_benchmarks: ["swe_bench", "livecodebench"]
+    reduced_samples: true  # Use reduced sample sizes
+    debug_samples: 2  # Small sample for debugging mode
+    # Optimization settings for 72B
+    use_dynamic_batching: true  # Enable dynamic batching based on input length
+    early_stopping: true  # Enable early stopping for math benchmarks
+    optimize_generation: true  # Use optimized generation parameters
+    aggressive_optimization: true  # Enable aggressive optimizations for 72B
+
+# GPU configuration - Supports 4/8 GPU clusters
+gpu:
+  num_gpus: 4  # Number of GPUs to use (can be 1, 2, 4, or 8)
+  device_map: "auto"  # or "balanced", "sequential", "balanced_low_0"
+  torch_dtype: "float16"  # or "bfloat16", "float32"
+  trust_remote_code: true
+  
+  # Quantization settings
+  # Note: This quantizes the BASE MODEL only. Adapters remain in full precision.
+  # This is the standard approach for quantized models with LoRA adapters.
+  quantization:
+    enabled: true
+    bits: 4  # 4-bit quantization (NF4) for base model
+    quant_type: "nf4"  # or "fp4"
+    double_quant: true  # Double quantization for additional compression
+    compute_dtype: "float16"  # Compute dtype for quantized layers
+    use_flash_attention: true  # Use flash attention for faster inference
+    adapter_precision: "float16"  # Adapters remain in full precision (float16)
+
+# Benchmark configurations - Optimized for fast execution
+benchmarks:
+  # AIME (American Invitational Mathematics Examination)
+  aime:
+    enabled: true
+    dataset_path: "datasets/aime"
+    num_samples: 50  # Reduced from 250 for faster execution
+    num_samples_14b: 10  # Further reduced for 14B model (was 15)
+    num_samples_72b: 8  # Aggressively reduced for 72B model (was 20)
+    debug_samples: 5  # Small sample for debugging mode
+    max_length: 2048
+    max_new_tokens: 128  # Reduced from 256 for faster generation
+    temperature: 0.0  # Deterministic for math
+    top_p: 1.0
+    top_k: 1
+    num_beams: 1
+    do_sample: false
+    metrics:
+      - "accuracy"
+      - "pass_at_1"
+      - "memory_usage"
+      - "inference_time"
+      - "throughput"
+    evaluation_type: "exact_match"
+    timeout: 60  # Reduced from 300 seconds per problem
+    # 14B optimization
+    early_stopping_tokens: ["Answer:", "Therefore", "The answer is"]  # Stop early if these appear
+  
+  # MATH benchmark
+  math:
+    enabled: true
+    dataset_path: "datasets/math"
+    num_samples: 100  # Reduced from 5000 for faster execution
+    num_samples_14b: 15  # Further reduced for 14B model (was 25)
+    num_samples_72b: 10  # Aggressively reduced for 72B model (was 30)
+    debug_samples: 5  # Small sample for debugging mode
+    max_length: 2048
+    max_new_tokens: 128  # Reduced from 256 for faster generation
+    temperature: 0.0
+    top_p: 1.0
+    top_k: 1
+    num_beams: 1
+    do_sample: false
+    metrics:
+      - "accuracy"
+      - "pass_at_1"
+      - "memory_usage"
+      - "inference_time"
+      - "throughput"
+    evaluation_type: "exact_match"
+    timeout: 60  # Reduced from 300
+    # 14B optimization
+    early_stopping_tokens: ["Answer:", "Therefore", "Final answer", "The answer is"]  # Stop early if these appear
+  
+  # LiveCodeBench
+  livecodebench:
+    enabled: true
+    dataset_path: "datasets/livecodebench"
+    num_samples: 50  # Reduced from 500 for faster execution
+    num_samples_14b: 5  # Aggressively reduced for 14B model (was 10)
+    num_samples_72b: 3  # Aggressively reduced for 72B model (was 10)
+    debug_samples: 3  # Small sample for debugging mode
+    max_length: 4096
+    max_new_tokens: 256  # Reduced for 14B optimization
+    temperature: 0.2
+    top_p: 0.95
+    top_k: 50
+    num_beams: 1
+    do_sample: true
+    metrics:
+      - "pass_rate"
+      - "pass_at_1"
+      - "memory_usage"
+      - "inference_time"
+      - "throughput"
+    evaluation_type: "code_execution"
+    timeout: 60  # Aggressively reduced from 120 seconds for 14B
+    timeout_72b: 45  # Further reduced for 72B model
+    num_test_cases: 3  # Reduced from 5 for 14B optimization
+    num_test_cases_72b: 2  # Further reduced for 72B model
+    # 14B optimization
+    early_stopping_tokens: ["```", "def ", "class "]  # Stop early if code block detected
+    # 72B optimization
+    early_stopping_tokens_72b: ["```", "def ", "class "]  # Stop early if code block detected
+  
+  # SWE-Bench (Software Engineering Benchmark)
+  swe_bench:
+    enabled: true
+    dataset_path: "datasets/swe_bench"
+    num_samples: 30  # Reduced from 300 for faster execution
+    num_samples_14b: 5  # Further reduced for 14B model (was 10)
+    num_samples_72b: 3  # Aggressively reduced for 72B model (was 5)
+    debug_samples: 2  # Small sample for debugging mode
+    max_length: 4096
+    temperature: 0.2
+    top_p: 0.95
+    top_k: 50
+    num_beams: 1
+    do_sample: true
+    metrics:
+      - "resolved_rate"
+      - "pass_at_1"
+      - "memory_usage"
+      - "inference_time"
+      - "throughput"
+    evaluation_type: "patch_execution"
+    timeout: 300  # Reduced from 1200 seconds per problem
+    max_retries: 2  # Reduced from 3
+  
+  # GPQA (Graduate-Level Google-Proof Q&A)
+  gpqa:
+    enabled: true
+    dataset_path: "datasets/gpqa"
+    num_samples: 100  # Reduced from 548 for faster execution
+    num_samples_14b: 15  # Further reduced for 14B model (was 25)
+    num_samples_72b: 8  # Aggressively reduced for 72B model (was 30)
+    debug_samples: 5  # Small sample for debugging mode
+    max_length: 2048
+    max_new_tokens: 64  # Reduced for multiple choice (shorter answers needed)
+    temperature: 0.0
+    top_p: 1.0
+    top_k: 1
+    num_beams: 1
+    do_sample: false
+    metrics:
+      - "accuracy"
+      - "pass_at_1"
+      - "memory_usage"
+      - "inference_time"
+      - "throughput"
+    evaluation_type: "multiple_choice"
+    timeout: 60  # Reduced from 300
+    # 14B optimization
+    early_stopping_tokens: ["Answer:", "The answer is", "Therefore"]  # Stop early if these appear
+
+# Generation parameters - Optimized for speed
+generation:
+  max_new_tokens: 256  # Reduced from 512 for faster generation
+  min_new_tokens: 1
+  repetition_penalty: 1.0
+  length_penalty: 1.0
+  early_stopping: true
+  pad_token_id: null  # Will use eos_token_id if null
+
+# Evaluation settings - Optimized for speed
+evaluation:
+  num_workers: 8  # Increased for parallel processing
+  cache_dir: "cache"  # Cache for downloaded models/datasets
+  save_predictions: true
+  save_intermediate_results: true
+  verbose: true
+  parallel_evaluation: true  # Enable parallel evaluation
+
+# Output settings
+output:
+  base_dir: "benchmark_results"
+  format: "json"  # or "csv", "both"
+  include_timestamp: true
+  include_model_info: true
+  include_system_info: true
+
+# Logging
+logging:
+  log_dir: "logs/benchmark"
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  log_to_file: true
+  log_to_console: true
+
+# Performance tracking
+performance:
+  track_memory: true
+  track_latency: true
+  track_throughput: true
+  log_interval: 5  # Log every 5 samples
+
+# Error handling
+error_handling:
+  max_retries: 2  # Reduced from 3
+  retry_delay: 3  # Reduced from 5 seconds
+  continue_on_error: true
+  save_failed_samples: true
+
+# Advanced settings - Optimized for speed
+advanced:
+  use_flash_attention: true
+  use_cache: true
+  gradient_checkpointing: false
+  low_cpu_mem_usage: true
+  device_map_options:
+    max_memory: null  # e.g., {0: "20GB", 1: "20GB", 2: "20GB", 3: "20GB"}
+    no_split_module_classes: null
+    offload_folder: "offload"
+    offload_state_dict: false
+  
+  # Multi-GPU optimization
+  multi_gpu:
+    enable_model_parallel: true  # Enable model parallelism for large models
+    enable_pipeline_parallel: false  # Pipeline parallelism (experimental)
+    enable_tensor_parallel: true  # Tensor parallelism for faster inference
+    reduce_bucket_size: 5e8  # Bucket size for all-reduce
+    bucket_size: 5e7  # Bucket size for all-gather
+
+# Execution optimization
+execution:
+  # Time budget for entire benchmark run (in hours)
+  max_execution_time: 4  # 4 hours total
+  
+  # Early stopping if time budget exceeded
+  enable_time_budget: true
+  
+  # Skip benchmarks if time running low
+  skip_slow_benchmarks: true
+  
+  # Priority order for benchmarks (run first if time limited)
+  benchmark_priority:
+    - "gpqa"  # Fastest
+    - "aime"
+    - "math"
+    - "livecodebench"
+    - "swe_bench"  # Slowest
+  
+  # Model priority (run smaller models first)
+  model_priority:
+    - "0.5B"
+    - "7B"
+    - "14B"
+    - "72B"
+
+# Baseline configurations for comparison
+baselines:
+  # 4-bit quantization baseline (no adapters)
+  quantization_4bit:
+    enabled: true  # Set to true to enable baseline comparison
+    name: "4-bit Quantization (No Adapters)"
+    description: "Base model with 4-bit quantization, no LoRA adapters"
+    quantization: "4bit"
+    use_adapters: false
+  
+  # 4-bit quantization with LoRA adapters baseline
+  quantization_4bit_lora:
+    enabled: true  # Set to true to enable baseline comparison
+    name: "4-bit Quantization + LoRA"
+    description: "Base model with 4-bit quantization and LoRA adapters"
+    quantization: "4bit"
+    use_adapters: true
+    adapter_path: "outputs/trained_adapters"  # Path to trained adapters
+    adapter_config:
+      r: 16
+      lora_alpha: 32
+      lora_dropout: 0.05
+      target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+  
+  # Full precision baseline
+  full_precision:
+    enabled: false  # Set to true to enable baseline comparison
+    name: "Full Precision (No Quantization)"
+    description: "Base model in full precision, no quantization"
+    quantization: "none"
+    use_adapters: false
+
+# Debugging mode configuration
+debug:
+  enabled: false  # Set to true to enable debugging mode
+  use_debug_samples: true  # Use small sample sizes for debugging
+  verbose: true  # Verbose logging
+  save_predictions: true  # Save all predictions for analysis
+  compare_baselines: true  # Compare against baselines in debug mode
+  debug_sample_size: 3  # Default debug sample size for all benchmarks
+  run_baselines_in_debug: true  # Run baseline comparisons in debug mode

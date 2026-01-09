@@ -1,0 +1,42 @@
+# GaLore (Gradient Low-Rank Projection) Configuration
+
+# Model Configuration
+quantized_model_path: "outputs/quantized_model"
+adapter_path: "outputs/adapters"
+
+# Output Configuration
+output_dir: "outputs/checkpoints"
+
+# GaLore Parameters
+rank: 128
+learning_rate: 1.0e-4
+weight_decay: 0.01
+update_proj_gap: 200
+scale: 0.25
+proj_type: "std"  # Options: "std", "reverse_std", "full"
+
+# Training Configuration
+seed: 42
+num_epochs: 3
+batch_size: 4
+gradient_accumulation_steps: 4
+warmup_steps: 100
+logging_steps: 10
+save_steps: 500
+save_total_limit: 3
+
+# Dataset Configuration
+dataset: "c4"
+dataset_split: "train"
+max_samples: 10000
+max_length: 512
+
+# Optimizer Configuration
+optimizer: "galore_adamw"
+beta1: 0.9
+beta2: 0.999
+eps: 1.0e-8
+
+# Training Features
+gradient_checkpointing: true
+fp16: true
