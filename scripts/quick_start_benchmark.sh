@@ -42,6 +42,12 @@ if ! "$PYTHON_BIN" -c "import torch" >/dev/null 2>&1; then
 fi
 
 pip install -q -r requirements.txt
+
+# Optional (but recommended) for speed: FlashAttention2.
+# We attempt to install it if the GPU is compatible. Failure is non-fatal.
+echo "Attempting to install FlashAttention2 (optional)..."
+"$PYTHON_BIN" scripts/check_env.py --install-flash-attn || true
+
 echo "✓ Dependencies installed"
 echo ""
 

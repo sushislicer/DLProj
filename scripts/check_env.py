@@ -12,6 +12,8 @@ Run:
 
 from __future__ import annotations
 
+import argparse
+
 
 def _try_import(name: str):
     try:
@@ -22,6 +24,14 @@ def _try_import(name: str):
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Environment sanity check")
+    parser.add_argument(
+        "--install-flash-attn",
+        action="store_true",
+        help="Attempt to install FlashAttention2 (flash-attn) if missing",
+    )
+    args = parser.parse_args()
+
     ok, v = _try_import("torch")
     print(f"torch: {ok} ({v})")
     if ok:
@@ -35,6 +45,16 @@ def main() -> None:
                 p = torch.cuda.get_device_properties(i)
                 print(f"  GPU {i}: {p.name} total_mem={p.total_memory/1024**3:.1f}GB cc={p.major}.{p.minor}")
 
+    if args.install_flash_attn:
+        try:
+            from utils.helpers import setup_logging
+            from utils.flash_attention import ensure_flash_attn2
+
+            logger = setup_logging(log_dir="logs/benchmark", log_file="check_env.log", logger_name="check_env")
+            ensure_flash_attn2(logger=logger, auto_install=True)
+        except Exception as e:
+            print(f"flash_attn install attempt failed: {e}")
+
     for pkg in ["transformers", "accelerate", "bitsandbytes", "peft", "flash_attn"]:
         ok, v = _try_import(pkg)
         print(f"{pkg}: {ok} ({v})")
@@ -46,4 +66,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

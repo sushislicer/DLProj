@@ -265,6 +265,10 @@ error_handling:
 # Advanced settings - Optimized for speed
 advanced:
   use_flash_attention: true
+  # If FlashAttention2 (`flash-attn`) is missing and this is true, the runner will
+  # attempt to `pip install flash-attn` automatically at startup.
+  # You can also set env var AUTO_INSTALL_FLASH_ATTN=1.
+  auto_install_flash_attention: true
   use_cache: true
   gradient_checkpointing: false
   low_cpu_mem_usage: true

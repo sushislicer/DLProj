@@ -20,6 +20,7 @@ TIME_BUDGET=${TIME_BUDGET:-4}  # hours
 QUANTIZE=${QUANTIZE:-true}
 DEBUG=${DEBUG:-false}
 RUN_BASELINES=${RUN_BASELINES:-false}
+AUTO_INSTALL_FLASH_ATTN=${AUTO_INSTALL_FLASH_ATTN:-true}
 
 echo "Configuration:"
 echo "  Number of GPUs: $NUM_GPUS"
@@ -27,6 +28,7 @@ echo "  Time Budget: ${TIME_BUDGET} hours"
 echo "  Quantization: $QUANTIZE"
 echo "  Debug: $DEBUG"
 echo "  Run baselines (4-bit / 4-bit QLoRA): $RUN_BASELINES"
+echo "  Auto-install FlashAttention2: $AUTO_INSTALL_FLASH_ATTN"
 echo ""
 
 # Check if Python is available
@@ -67,6 +69,10 @@ CMD=("$PYTHON_BIN" scripts/run_benchmarks.py \
     --num_gpus $NUM_GPUS \
     --time_budget $TIME_BUDGET \
     --quantize)
+
+if [ "$AUTO_INSTALL_FLASH_ATTN" = "true" ]; then
+  export AUTO_INSTALL_FLASH_ATTN=1
+fi
 
 if [ "$DEBUG" = "true" ]; then
   CMD+=(--debug)

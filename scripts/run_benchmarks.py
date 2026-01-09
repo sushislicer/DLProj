@@ -28,6 +28,7 @@ from accelerate import infer_auto_device_map, dispatch_model
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.helpers import setup_logging, ensure_dir, format_time
 from utils.memory_tracker import MemoryTracker
+from utils.flash_attention import pick_attn_implementation
 
 
 class BenchmarkRunner:
@@ -254,10 +255,22 @@ class BenchmarkRunner:
             'cache_dir': self.config['evaluation']['cache_dir'],
         }
 
-        # Prefer FlashAttention2 if enabled. If unavailable, fall back.
-        # This must be set at load time (`attn_implementation`).
-        if bool(self.config['advanced'].get('use_flash_attention', False)) or bool(self.config['gpu']['quantization'].get('use_flash_attention', False)):
-            model_kwargs['attn_implementation'] = 'flash_attention_2'
+        # Prefer FlashAttention2 if enabled.
+        # If missing and auto-install is enabled, attempt to install it.
+        # If still unavailable, fall back to default attention.
+        prefer_flash2 = bool(self.config['advanced'].get('use_flash_attention', False)) or bool(
+            self.config['gpu']['quantization'].get('use_flash_attention', False)
+        )
+        auto_install_flash2 = bool(self.config['advanced'].get('auto_install_flash_attention', False)) or (
+            str(os.environ.get('AUTO_INSTALL_FLASH_ATTN', '')).strip() in ('1', 'true', 'True', 'yes', 'YES')
+        )
+        attn_impl = pick_attn_implementation(
+            logger=self.logger,
+            prefer_flash2=prefer_flash2,
+            auto_install=auto_install_flash2,
+        )
+        if attn_impl:
+            model_kwargs['attn_implementation'] = attn_impl
         
         # Add quantization config if enabled
         if quantization_config is not None:
