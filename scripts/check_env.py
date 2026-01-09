@@ -40,6 +40,12 @@ def main() -> None:
         print(f"torch.cuda.is_available: {torch.cuda.is_available()}")
         print(f"torch.version.cuda: {torch.version.cuda}")
         print(f"torch.cuda.device_count: {torch.cuda.device_count()}")
+        try:
+            arch_list = getattr(torch.cuda, "get_arch_list", lambda: [])()
+            if arch_list:
+                print(f"torch.cuda.get_arch_list: {arch_list}")
+        except Exception as e:
+            print(f"torch.cuda.get_arch_list: <error> ({e})")
         if torch.cuda.is_available():
             for i in range(torch.cuda.device_count()):
                 p = torch.cuda.get_device_properties(i)

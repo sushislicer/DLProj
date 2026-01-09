@@ -36,13 +36,12 @@ pip install --upgrade pip
 
 # Install CUDA-enabled PyTorch first (recommended on GPU servers)
 echo ""
-echo "Installing PyTorch (CUDA) ..."
-if ! "$PYTHON_BIN" -c "import torch" >/dev/null 2>&1; then
-    echo "PyTorch not found; installing CUDA wheels (cu124)."
-    echo "If your server uses CUDA 12.1, replace cu124 with cu121."
-    pip install --index-url https://download.pytorch.org/whl/cu124 torch torchvision torchaudio
-fi
-"$PYTHON_BIN" -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda, 'is_available', torch.cuda.is_available())"
+echo "Installing/validating PyTorch (CUDA) ..."
+# This uses a small helper that can switch to nightly builds for newer GPUs
+# (e.g., RTX 50xx / SM120) when needed.
+# NOTE: the helper installs *torch only* by default (no torchvision/torchaudio)
+# to avoid common torch/torchvision mismatch issues that can break transformers.
+"$PYTHON_BIN" scripts/fix_torch.py
 
 # Install core dependencies
 echo ""

@@ -40,6 +40,18 @@ FlashAttention2 generally requires NVIDIA Ampere (SM80) or newer.
         props = torch.cuda.get_device_properties(0)
         if getattr(props, "major", 0) < 8:
             return False, f"compute capability {props.major}.{props.minor} < 8.0"
+
+        # Also ensure the installed torch build actually supports the GPU arch.
+        # Newer GPUs (e.g., SM120) may require a newer/nightly PyTorch wheel.
+        try:
+            arch = f"sm_{props.major}{props.minor}"
+            arch_list = set(getattr(torch.cuda, "get_arch_list", lambda: [])())
+            if arch_list and arch not in arch_list:
+                return False, f"PyTorch wheel does not include {arch} (has {sorted(arch_list)})"
+        except Exception:
+            # If we can't query arch list, don't block.
+            pass
+
         return True, f"cc={props.major}.{props.minor}"
     except Exception as e:
         return False, f"could not check GPU: {e}"
@@ -127,4 +139,3 @@ def pick_attn_implementation(*, logger, prefer_flash2: bool, auto_install: bool)
     if not ok:
         return None
     return "flash_attention_2"
-

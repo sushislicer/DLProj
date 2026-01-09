@@ -1,8 +1,9 @@
 # Core dependencies
-# NOTE: On GPU servers you often want to install a CUDA-enabled PyTorch wheel
-# explicitly before installing the rest of the requirements (see
-# [`docs/BENCHMARKING_GUIDE.md`](docs/BENCHMARKING_GUIDE.md:30)).
-torch>=2.0.0
+# NOTE: Install PyTorch separately.
+# For GPU machines, the correct wheel depends on your CUDA runtime and GPU arch
+# (e.g. RTX 5090 = SM120 may require a newer/nightly wheel). Use
+# [`scripts/fix_torch.py`](scripts/fix_torch.py:1) or [`setup.sh`](setup.sh:1)
+# before running `pip install -r requirements.txt`.
 transformers>=4.35.0
 accelerate>=0.24.0
 peft>=0.7.0
