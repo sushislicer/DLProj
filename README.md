@@ -30,6 +30,21 @@ Important distinction:
   calibration objective and optional **bitsandbytes 4/8-bit reload**, plus a
   **post-quant distillation** step during GaLore training.
 
+## External dependencies (PiSSA / SpinQuant / GaLore)
+
+This repo can be used in two modes:
+
+1) **Self-contained (default)**: the pipeline + benchmarking run using the code
+   inside this repo.
+   - "PiSSA" stage: implemented via PEFT/LoRA in [`scripts/pissa_extraction.py`](scripts/pissa_extraction.py:1)
+   - "SpinQuant" stage: implemented in-repo in [`scripts/spinquant.py`](scripts/spinquant.py:1)
+   - "GaLore" stage: training loop is in-repo; optimizer can optionally come
+     from `galore_torch` if installed (fallback to AdamW).
+
+2) **Paper-faithful / external tooling (optional)**: install official upstream
+   repos to reproduce their exact algorithms/kernels.
+   This is *not required* to run benchmarks.
+
 ## Pipeline Architecture
 
 ```
@@ -126,7 +141,10 @@ Important distinction:
 
 1. Clone the repository:
 ```bash
-cd /home/yangc/DLProj
+# On your SSH server, clone under your home directory (example):
+cd ~
+git clone <YOUR_REPO_URL> DLProj
+cd ~/DLProj
 ```
 
 2. Install dependencies:
@@ -134,19 +152,21 @@ cd /home/yangc/DLProj
 pip install -r requirements.txt
 ```
 
-3. Install additional libraries:
+3. Install additional libraries (optional):
 
-**PiSSA:**
+These are only needed if you want the *official* implementations.
+
+**PiSSA (official):**
 ```bash
-pip install git+https://github.com/hiyouga/PiSSA.git
+pip install git+https://github.com/GraphPKU/PiSSA.git
 ```
 
-**GaLore:**
+**GaLore optimizer package (optional acceleration):**
 ```bash
 pip install galore-torch
 ```
 
-**SpinQuant:**
+**SpinQuant (official):**
 ```bash
 pip install git+https://github.com/ModelTC/SpinQuant.git
 ```

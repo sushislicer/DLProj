@@ -34,25 +34,38 @@ echo ""
 echo "Upgrading pip..."
 pip install --upgrade pip
 
+# Install CUDA-enabled PyTorch first (recommended on GPU servers)
+echo ""
+echo "Installing PyTorch (CUDA) ..."
+if ! "$PYTHON_BIN" -c "import torch" >/dev/null 2>&1; then
+    echo "PyTorch not found; installing CUDA wheels (cu124)."
+    echo "If your server uses CUDA 12.1, replace cu124 with cu121."
+    pip install --index-url https://download.pytorch.org/whl/cu124 torch torchvision torchaudio
+fi
+"$PYTHON_BIN" -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda, 'is_available', torch.cuda.is_available())"
+
 # Install core dependencies
 echo ""
 echo "Installing core dependencies..."
 pip install -r requirements.txt
 
-# Install PiSSA
+# Optional external libraries
 echo ""
-echo "Installing PiSSA..."
-pip install git+https://github.com/hiyouga/PiSSA.git
+read -p "Install optional external PiSSA/SpinQuant/GaLore tooling (y/n)? " -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]
+then
+    echo "Installing official PiSSA (GraphPKU/PiSSA)..."
+    pip install git+https://github.com/GraphPKU/PiSSA.git
 
-# Install GaLore
-echo ""
-echo "Installing GaLore..."
-pip install galore-torch
+    echo "Installing GaLore optimizer package (galore-torch)..."
+    pip install galore-torch
 
-# Install SpinQuant
-echo ""
-echo "Installing SpinQuant..."
-pip install git+https://github.com/ModelTC/SpinQuant.git
+    echo "Installing official SpinQuant (ModelTC/SpinQuant)..."
+    pip install git+https://github.com/ModelTC/SpinQuant.git
+else
+    echo "Skipping optional external tooling. Using in-repo implementations where applicable."
+fi
 
 # Create default configuration
 echo ""

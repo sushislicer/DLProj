@@ -15,14 +15,21 @@ psutil>=5.9.0
 # is not installed yet. Install from [`requirements_gptq.txt`](requirements_gptq.txt:1)
 # after PyTorch is available.
 
-# PiSSA
-# Install from: https://github.com/hiyouga/PiSSA
+# PiSSA (optional)
+# The pipeline's default "PiSSA" stage in this repo is implemented via PEFT/LoRA
+# in [`scripts/pissa_extraction.py`](scripts/pissa_extraction.py:1) and does not
+# require installing the official PiSSA repo.
+# Official repo (only if you want upstream implementation):
+# https://github.com/GraphPKU/PiSSA
 
 # GaLore
 galore-torch>=1.0.0
 
-# SpinQuant
-# Install from: https://github.com/ModelTC/SpinQuant
+# SpinQuant (optional)
+# This repo includes an in-repo "SpinQuant-lite" implementation in
+# [`scripts/spinquant.py`](scripts/spinquant.py:1). Install the official repo
+# only if you specifically need it:
+# https://github.com/ModelTC/SpinQuant
 
 # Utilities
 numpy>=1.24.0
