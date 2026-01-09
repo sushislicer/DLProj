@@ -1031,6 +1031,15 @@ def main():
         nargs='+',
         help='Model sizes to benchmark (e.g., 0.5B 7B 32B)'
     )
+
+    parser.add_argument(
+        '--quick_05b',
+        action='store_true',
+        help=(
+            'Extreme time-budget mode: force evaluation to run only the 0.5B model '
+            'and enable debug sampling (small datasets + reduced generation).'
+        )
+    )
     parser.add_argument(
         '--benchmarks',
         type=str,
@@ -1109,6 +1118,12 @@ def main():
 
     # Baseline execution is opt-in.
     runner.run_baselines = bool(args.run_baselines)
+
+    # Convenience: quick 0.5B-only mode for fast iteration.
+    if args.quick_05b:
+        args.model_sizes = ['0.5B']
+        args.debug = True
+        logger.info('quick_05b enabled: forcing --model_sizes 0.5B and enabling --debug')
 
     # Enable debug mode
     if args.debug:
