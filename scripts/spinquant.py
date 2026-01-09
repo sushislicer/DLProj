@@ -208,7 +208,9 @@ class SpinQuantizer:
         """
         spinquant_config = self.config['spinquant']
         
-        backend = spinquant_config.get('backend', 'blockwise_givens')
+        # Default to the fast fixed rotation backend.
+        # The learned rotation backend can be extremely slow on large models.
+        backend = spinquant_config.get('backend', 'hadamard')
         self.logger.info(f"Applying SpinQuant backend: {backend}")
         self.logger.info("=" * 60)
         self.logger.info("SPINQUANT-LITE (this repo):")
@@ -455,7 +457,9 @@ def main():
     parser.add_argument(
         '--backend',
         type=str,
-        default='blockwise_givens',
+        # Default to the fast fixed Hadamard path.
+        # Use `blockwise_givens` explicitly if you *want* the slow learned-rotation optimization.
+        default='hadamard',
         choices=['blockwise_givens', 'hadamard'],
         help='SpinQuant backend implementation'
     )

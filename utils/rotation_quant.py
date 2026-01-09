@@ -37,7 +37,9 @@ class RotationQuantConfig:
     # Rotation backend selection.
     # - blockwise_givens: learned rotation via Givens sweeps (slowest, best effort)
     # - hadamard: fixed fast Hadamard rotation (no learning; very fast)
-    backend: str = "blockwise_givens"
+    # Default to the fast fixed rotation backend. The learned rotation backend can
+    # take a very long time on large models.
+    backend: str = "hadamard"
     module_name_substrings: Tuple[str, ...] = (
         "q_proj",
         "k_proj",

@@ -17,11 +17,11 @@ symmetric: false
 # This repo defaults to a lightweight SpinQuant-style backend (blockwise Givens
 # rotations + weight-domain fake-quant objective), rather than vendoring the full
 # SpinQuant implementation.
-backend: "blockwise_givens"  # Options: blockwise_givens
+backend: "hadamard"  # Options: hadamard, blockwise_givens
 
 # SpinQuant-lite rotation optimization knobs
 block_size: 64
-num_steps: 50
+num_steps: 50  # (unused for hadamard)
 lr: 0.05
 num_sweeps: 2
 max_layers: 16

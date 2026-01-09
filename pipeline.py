@@ -359,15 +359,17 @@ def create_default_config():
             'quant_type': 'nf4',
             'group_size': 128,
             'symmetric': False,
-            # SpinQuant-lite backend (blockwise Givens rotations)
-            'backend': 'blockwise_givens',
+            # SpinQuant-lite backend
+            # Default to fast fixed Hadamard rotations. The learned Givens backend
+            # can take a very long time on large models.
+            'backend': 'hadamard',
             'block_size': 64,
-            'num_steps': 20,
+            'num_steps': 5,
             'lr': 0.05,
             'num_sweeps': 2,
-            'max_layers': 8,
-            # Rotation learning is expensive; default to skipping for bounded runtime.
-            'skip_rotations': True,
+            'max_layers': 4,
+            # Keep rotations enabled by default (Hadamard path is fast).
+            'skip_rotations': False,
             'use_bnb_quantization': True,
             'use_activation_objective': True,
             'calibration_vectors_per_layer': 256,
