@@ -111,9 +111,8 @@ class QuantizationPipeline:
         ]
 
         # SpinQuant-lite backend selection.
-        # IMPORTANT: `scripts/spinquant.py` defaults to blockwise_givens, which can
-        # be extremely slow. If you want the fast fixed rotation path, you must
-        # pass `--backend hadamard` explicitly.
+        # `scripts/spinquant.py` defaults to the fast fixed Hadamard path.
+        # Use `blockwise_givens` explicitly only if you want the slow learned-rotation backend.
         backend = str(self.config.get('spinquant', {}).get('backend', 'blockwise_givens'))
         cmd.extend(['--backend', backend])
 

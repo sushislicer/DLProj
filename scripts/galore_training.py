@@ -60,6 +60,32 @@ class GaLoreTrainer:
         # Set random seed
         set_seed(config.get('seed', 42))
         
+        def _model_uses_bnb_quant(m: torch.nn.Module) -> bool:
+            """Best-effort detection of bitsandbytes quantized Linear modules.
+
+            PiSSA adapter initialization in PEFT requires float weights (fp16/bf16/fp32).
+            If the base model is loaded with bitsandbytes 4/8-bit modules, PEFT's
+            PiSSA init will error.
+            """
+            for _n, mod in m.named_modules():
+                cls_name = mod.__class__.__name__
+                cls_mod = mod.__class__.__module__
+                if 'bitsandbytes' in cls_mod:
+                    return True
+                if cls_name in ("Linear4bit", "Linear8bitLt"):
+                    return True
+            return False
+
+        def _infer_fp16_fallback_path(q_path: str) -> str | None:
+            # Common pipeline layout:
+            #   <output_dir>/quantized_model
+            #   <output_dir>/rotated_residual_model
+            parent = os.path.dirname(q_path.rstrip('/'))
+            cand = os.path.join(parent, 'rotated_residual_model')
+            if os.path.isdir(cand):
+                return cand
+            return None
+
         # Load quantized base model
         quantized_model_path = config['quantized_model_path']
         self.logger.info(f"Loading quantized base model from {quantized_model_path}")
@@ -72,6 +98,35 @@ class GaLoreTrainer:
             trust_remote_code=True,
             attn_implementation="sdpa",
         )
+
+        # If the base model is bitsandbytes-quantized, PiSSA init will fail.
+        # Fall back to a float16 checkpoint if available (produced by SpinQuant stage).
+        if _model_uses_bnb_quant(self.base_model):
+            fp16_path = config.get('fp16_base_model_path') or _infer_fp16_fallback_path(quantized_model_path)
+            if fp16_path:
+                self.logger.warning(
+                    "Detected bitsandbytes-quantized base model; PiSSA adapter init requires fp16/bf16/fp32. "
+                    f"Reloading base model from fp16 checkpoint: {fp16_path}"
+                )
+                try:
+                    del self.base_model
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+                self.base_model = AutoModelForCausalLM.from_pretrained(
+                    fp16_path,
+                    torch_dtype=torch.float16,
+                    device_map="auto",
+                    trust_remote_code=True,
+                    attn_implementation="sdpa",
+                )
+                quantized_model_path = fp16_path
+            else:
+                raise RuntimeError(
+                    "Base model appears to be bitsandbytes-quantized, but no fp16 fallback checkpoint was found. "
+                    "PiSSA adapter init requires fp16/bf16/fp32 weights. "
+                    "Fix: rerun SpinQuant with use_bnb_quantization=false, or provide a fp16 checkpoint via --fp16_base_model_path."
+                )
         
         self.tokenizer = AutoTokenizer.from_pretrained(
             quantized_model_path,
@@ -623,6 +678,17 @@ def main():
         required=True,
         help='Path to the quantized base model'
     )
+
+    parser.add_argument(
+        '--fp16_base_model_path',
+        type=str,
+        default=None,
+        help=(
+            'Optional fp16 base model path for PiSSA init. '
+            'If the provided quantized model uses bitsandbytes 4/8-bit modules, '
+            'we will reload from this fp16 checkpoint (e.g., <output_dir>/rotated_residual_model).'
+        )
+    )
     parser.add_argument(
         '--adapter_path',
         type=str,
@@ -697,6 +763,7 @@ def main():
     # Build configuration
     config = {
         'quantized_model_path': args.quantized_model_path,
+        'fp16_base_model_path': args.fp16_base_model_path,
         'adapter_path': args.adapter_path,
         'output_dir': args.output_dir,
         'seed': 42,
