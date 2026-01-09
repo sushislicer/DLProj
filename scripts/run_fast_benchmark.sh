@@ -21,6 +21,7 @@ QUANTIZE=${QUANTIZE:-true}
 DEBUG=${DEBUG:-false}
 RUN_BASELINES=${RUN_BASELINES:-false}
 AUTO_INSTALL_FLASH_ATTN=${AUTO_INSTALL_FLASH_ATTN:-true}
+DISABLE_FLASH_ATTN=${DISABLE_FLASH_ATTN:-false}
 
 echo "Configuration:"
 echo "  Number of GPUs: $NUM_GPUS"
@@ -29,6 +30,7 @@ echo "  Quantization: $QUANTIZE"
 echo "  Debug: $DEBUG"
 echo "  Run baselines (4-bit / 4-bit QLoRA): $RUN_BASELINES"
 echo "  Auto-install FlashAttention2: $AUTO_INSTALL_FLASH_ATTN"
+echo "  Disable FlashAttention2 (force fallback): $DISABLE_FLASH_ATTN"
 echo ""
 
 # Check if Python is available
@@ -72,6 +74,12 @@ CMD=("$PYTHON_BIN" scripts/run_benchmarks.py \
 
 if [ "$AUTO_INSTALL_FLASH_ATTN" = "true" ]; then
   export AUTO_INSTALL_FLASH_ATTN=1
+fi
+
+if [ "$DISABLE_FLASH_ATTN" = "true" ]; then
+  export DISABLE_FLASH_ATTN=1
+  # If explicitly disabling, also avoid any auto-install attempt.
+  unset AUTO_INSTALL_FLASH_ATTN
 fi
 
 if [ "$DEBUG" = "true" ]; then

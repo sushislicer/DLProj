@@ -29,6 +29,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.helpers import setup_logging, ensure_dir, format_time
 from utils.memory_tracker import MemoryTracker
 from utils.flash_attention import pick_attn_implementation
+from utils.hf_download import resolve_path_or_hf_repo, is_probably_hf_repo_id
 
 
 class BenchmarkRunner:
@@ -303,11 +304,17 @@ class BenchmarkRunner:
         # Optional: load adapters (LoRA/PiSSA) on top of the base model.
         adapter_path = model_config.get('adapter_path')
         if adapter_path:
-            if not os.path.exists(adapter_path):
+            # Allow adapter_path to be either a local directory or a HuggingFace Hub repo id.
+            # If repo id, download snapshot into cache_dir.
+            adapter_path = resolve_path_or_hf_repo(
+                str(adapter_path),
+                cache_dir=self.config.get('evaluation', {}).get('cache_dir'),
+                logger=self.logger,
+            )
+            if not os.path.exists(str(adapter_path)):
                 raise FileNotFoundError(
-                    f"adapter_path does not exist: {adapter_path}. "
-                    "For the 4-bit QLoRA baseline, set baselines.quantization_4bit_lora.adapter_path "
-                    "to a valid PEFT adapter directory."
+                    f"adapter_path does not exist after resolution: {adapter_path}. "
+                    "Provide a local PEFT adapter directory or a Hub repo id like 'org/repo[@rev]'."
                 )
             try:
                 from peft import PeftModel
@@ -346,17 +353,33 @@ class BenchmarkRunner:
         We keep this *opt-in* via CLI (`--run_baselines`) to avoid turning the
         default 2-4h sweep into a 6-12h sweep.
         """
-        variants = []
+        # Default behavior: run the model config as-is.
+        # When `--run_baselines` is enabled, we instead run a triad:
+        #   1) pipeline_4bit ("our pipeline" in 4-bit; typically base 4-bit + our adapters)
+        #   2) baseline_4bit (native 4-bit, no adapters)
+        #   3) baseline_4bit_qlora (4-bit base + QLoRA adapters)
+        # This avoids accidentally benchmarking the same "no-adapter" model twice.
 
-        # Main run config.
-        main_cfg = dict(model_config)
-        main_cfg.setdefault('variant', 'main')
-        variants.append(main_cfg)
-
-        # Optional baselines.
         baselines_cfg = self.config.get('baselines', {})
+
         if not getattr(self, 'run_baselines', False):
-            return variants
+            main_cfg = dict(model_config)
+            main_cfg.setdefault('variant', 'main')
+            return [main_cfg]
+
+        variants: List[Dict] = []
+
+        def _resolve_adapter_path(v) -> Optional[str]:
+            """Resolve adapter_path config.
+
+            Supports either a string or a mapping like:
+              {"default": "...", "7B": "...", "14B": "..."}
+            """
+            if v is None:
+                return None
+            if isinstance(v, dict):
+                return v.get(model_config.get('size')) or v.get('default')
+            return str(v)
 
         def _mk_variant(base: Dict, variant_id: str, bcfg: Dict) -> Dict:
             out = dict(base)
@@ -365,10 +388,30 @@ class BenchmarkRunner:
             if 'use_adapters' in bcfg and not bool(bcfg['use_adapters']):
                 out.pop('adapter_path', None)
             if bool(bcfg.get('use_adapters', False)):
-                out['adapter_path'] = bcfg.get('adapter_path')
+                out['adapter_path'] = _resolve_adapter_path(bcfg.get('adapter_path'))
             if 'quantization' in bcfg:
                 out['quantization'] = bcfg['quantization']
             return out
+
+        # 1) Our pipeline run (in 4-bit).
+        # Prefer per-model adapter_path; else fall back to baselines.pipeline_4bit.adapter_path.
+        p = baselines_cfg.get('pipeline_4bit', {})
+        pipeline_cfg = dict(model_config)
+        pipeline_cfg['variant'] = 'pipeline_4bit'
+        pipeline_cfg['quantization'] = '4bit'
+        if not pipeline_cfg.get('adapter_path'):
+            ap = _resolve_adapter_path(p.get('adapter_path'))
+            if ap:
+                pipeline_cfg['adapter_path'] = ap
+
+        if p.get('enabled', True):
+            if not pipeline_cfg.get('adapter_path'):
+                self.logger.warning(
+                    "pipeline_4bit enabled but no adapter_path configured. "
+                    "Set models[].adapter_path OR baselines.pipeline_4bit.adapter_path. "
+                    "(If you intended a no-adapter pipeline, ignore this.)"
+                )
+            variants.append(pipeline_cfg)
 
         # Native 4-bit quant baseline (no adapters)
         b1 = baselines_cfg.get('quantization_4bit', {})
@@ -380,13 +423,20 @@ class BenchmarkRunner:
         if b2.get('enabled', False):
             cand = _mk_variant(model_config, 'baseline_4bit_qlora', b2)
             ap = cand.get('adapter_path')
-            if not ap or not os.path.exists(str(ap)):
+            if not ap:
                 self.logger.warning(
                     "Skipping baseline_4bit_qlora because adapter_path is missing. "
                     f"Set baselines.quantization_4bit_lora.adapter_path to a valid PEFT adapter directory. Got: {ap}"
                 )
             else:
-                variants.append(cand)
+                # If adapter_path is a remote repo id, allow it; it will be downloaded at load time.
+                if os.path.exists(str(ap)) or is_probably_hf_repo_id(str(ap)):
+                    variants.append(cand)
+                else:
+                    self.logger.warning(
+                        "Skipping baseline_4bit_qlora because adapter_path is neither an existing local path nor a valid Hub repo id. "
+                        f"Got: {ap}"
+                    )
 
         return variants
     
@@ -896,6 +946,12 @@ def main():
         action='store_true',
         help='Also run baseline variants (native 4-bit quant, 4-bit QLoRA) as configured in the YAML'
     )
+
+    parser.add_argument(
+        '--no_flash_attn',
+        action='store_true',
+        help='Force-disable FlashAttention2 usage and auto-install (use standard attention instead)'
+    )
     
     args = parser.parse_args()
     
@@ -944,6 +1000,17 @@ def main():
             if benchmark_name not in args.benchmarks:
                 runner.config['benchmarks'][benchmark_name]['enabled'] = False
     
+    # Optional: force-disable FlashAttention2.
+    # This is a safety valve for environments where flash-attn is unstable or
+    # you want fully portable behavior.
+    if args.no_flash_attn or (str(os.environ.get('DISABLE_FLASH_ATTN', '')).strip() in ('1', 'true', 'True', 'yes', 'YES')):
+        runner.config.setdefault('advanced', {})
+        runner.config['advanced']['use_flash_attention'] = False
+        runner.config['advanced']['auto_install_flash_attention'] = False
+        runner.config.setdefault('gpu', {}).setdefault('quantization', {})
+        runner.config['gpu']['quantization']['use_flash_attention'] = False
+        logger.info('FlashAttention2 disabled for this run')
+
     # Run benchmarks
     runner.run_all_models(model_sizes=args.model_sizes)
     

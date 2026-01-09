@@ -9,6 +9,7 @@ accelerate>=0.24.0
 peft>=0.7.0
 bitsandbytes>=0.41.0
 psutil>=5.9.0
+huggingface_hub>=0.20.0
 
 # Quantization
 # Optional: GPTQ tooling (not required for the benchmark runner's 4-bit BnB path).

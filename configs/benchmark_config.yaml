@@ -314,6 +314,16 @@ execution:
 
 # Baseline configurations for comparison
 baselines:
+  # Our pipeline run in 4-bit. This is the "main" variant you want to compare.
+  # Typically: 4-bit base model + our trained adapters (PiSSA/GaLore/SpinQuant, etc.).
+  # Provide either per-model `models[].adapter_path` or set this `adapter_path`.
+  pipeline_4bit:
+    enabled: true
+    name: "Pipeline (Ours) 4-bit"
+    description: "Base model in 4-bit + our pipeline adapters (if provided)"
+    # Can be a string path, or a map like {default: "...", 7B: "...", 14B: "..."}
+    adapter_path: null
+
   # 4-bit quantization baseline (no adapters)
   quantization_4bit:
     enabled: true  # Set to true to enable baseline comparison
@@ -329,7 +339,12 @@ baselines:
     description: "Base model with 4-bit quantization and LoRA adapters"
     quantization: "4bit"
     use_adapters: true
-    adapter_path: "outputs/trained_adapters"  # Path to trained adapters
+    # QLoRA adapter baseline path.
+    # Can be either:
+    # - a local PEFT adapter directory, OR
+    # - a HuggingFace Hub repo id like "org/repo" (optionally "org/repo@revision");
+    #   it will be downloaded automatically into `evaluation.cache_dir`.
+    adapter_path: "outputs/qlora_adapters"  # or "org/repo[@rev]"
     adapter_config:
       r: 16
       lora_alpha: 32
