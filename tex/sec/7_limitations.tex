@@ -1,9 +1,20 @@
 \section{Limitations and Discussion}
 \label{sec:limits}
 
-\paragraph{Draft status of results.}
-At the time of writing, the benchmark harness is implemented and the tables in \cref{sec:results} are placeholders.
-Final numbers will be inserted once the full benchmark sweep completes.
+\paragraph{Resource Constraints.}
+A key limitation of this study is the lack of extensive evaluation due to limited manpower, compute resources, and time.
+Running comprehensive benchmarks on large models (e.g., 72B) requires significant GPU hours, which were not fully available for this project.
+Consequently, the results presented are based on a subset of the full evaluation suite, and some hyperparameter tuning was skipped.
+Future work would involve a more rigorous sweep of hyperparameters and full-scale evaluation on all benchmarks.
+
+\paragraph{Implementation Challenges.}
+During the development of this project, several challenges were encountered:
+\begin{itemize}
+    \item \textbf{Dependency Hell:} Integrating multiple libraries (PEFT, bitsandbytes, flash-attn) led to version conflicts, particularly with CUDA and PyTorch versions. We had to carefully pin versions to ensure compatibility.
+    \item \textbf{Memory Management:} Managing GPU memory for 72B models was difficult. We had to implement aggressive offloading and quantization strategies to fit the models into available VRAM.
+    \item \textbf{Dataset Access:} Some benchmarks (e.g., GPQA) are gated or have changing URLs, requiring robust download scripts and fallback mechanisms.
+    \item \textbf{Debugging Quantization:} Debugging numerical issues in 4-bit quantization was non-trivial, as small errors in rotation matrices could lead to significant degradation in model output.
+\end{itemize}
 
 \paragraph{Fixed rotations are a pragmatic choice.}
 While learned rotations (as in SpinQuant) can further reduce quantization error, they can be expensive for large models.
