@@ -381,22 +381,14 @@ class GaLoreTrainer:
         )
 
         # Convert tokenized documents into dense fixed-length LM blocks.
-        # This avoids pathological cases where many examples are 0-1 tokens
-        # (e.g., empty lines in WikiText), which can yield loss=0 because there
-        # are no next-token targets.
+        # NOTE: Do NOT pre-filter short lines before grouping.
+        # For datasets like WikiText, many rows are short, but they concatenate
+        # into plenty of tokens once grouped.
         block_size = int(self.config.get('max_length', 512))
-        min_tok = int(self.config.get('min_tokens_per_sample', min(32, max(2, block_size // 8))))
+        min_tok_cfg = int(self.config.get('min_tokens_per_sample', 0) or 0)
 
-        def _filter_short(ex):
-            ids = ex.get('input_ids')
-            if not isinstance(ids, list):
-                return False
-            return len(ids) >= min_tok
-
-        try:
-            tokenized_dataset = tokenized_dataset.filter(_filter_short)
-        except Exception:
-            pass
+        # Keep an ungrouped fallback so we never end up with num_samples=0.
+        ungrouped_dataset = tokenized_dataset
 
         def group_texts(examples):
             # Concatenate then split into fixed-size chunks.
@@ -429,8 +421,39 @@ class GaLoreTrainer:
                     f"Tokenized dataset became empty after grouping into blocks (block_size={block_size}). "
                     "Falling back to ungrouped tokenized samples."
                 )
+                tokenized_dataset = ungrouped_dataset
         except Exception as e:
             self.logger.warning(f"Failed to group texts into blocks; continuing with ungrouped samples. ({e})")
+            tokenized_dataset = ungrouped_dataset
+
+        # If we are using the ungrouped fallback, filter out extremely short
+        # samples (helps avoid loss=0). Be robust: if filtering removes
+        # everything, progressively relax the threshold.
+        if hasattr(tokenized_dataset, '__len__') and len(tokenized_dataset) == 0:
+            tokenized_dataset = ungrouped_dataset
+
+        if min_tok_cfg and hasattr(tokenized_dataset, 'filter'):
+            def _filter_short(ex, thr: int):
+                ids = ex.get('input_ids')
+                if not isinstance(ids, list):
+                    return False
+                return len(ids) >= int(thr)
+
+            for thr in (min_tok_cfg, min(8, min_tok_cfg), 2, 1):
+                try:
+                    cand = tokenized_dataset.filter(lambda ex, t=thr: _filter_short(ex, t))
+                    if hasattr(cand, '__len__') and len(cand) > 0:
+                        tokenized_dataset = cand
+                        break
+                except Exception:
+                    break
+
+        if hasattr(tokenized_dataset, '__len__') and len(tokenized_dataset) == 0:
+            raise ValueError(
+                "Training dataset is empty after preprocessing. "
+                f"Check dataset='{dataset_name}', dataset_config='{dataset_config}', split='{dataset_split}', "
+                f"and adjust max_length={block_size} / min_tokens_per_sample={min_tok_cfg}."
+            )
 
         self.logger.info(f"Dataset prepared with {len(tokenized_dataset)} examples")
         self.memory_tracker.log_memory("GaLore", "Dataset prepared")

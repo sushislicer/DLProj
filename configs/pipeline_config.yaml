@@ -36,8 +36,9 @@ dataset: "wikitext"
 dataset_config: "wikitext-2-v1"
 dataset_split: "train"
 dataset_streaming: false
-# Filter out very short samples; prevents pathological loss=0 / grad_norm=0.
-min_tokens_per_sample: 32
+# Filter out very short samples (used only if grouping into blocks fails and we
+# fall back to ungrouped tokenized samples).
+min_tokens_per_sample: 8
 max_samples: 4000
 max_length: 512
 

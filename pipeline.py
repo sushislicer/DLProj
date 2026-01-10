@@ -352,7 +352,7 @@ def create_default_config():
         'dataset_config': 'wikitext-2-v1',
         'dataset_split': 'train',
         'dataset_streaming': False,
-        'min_tokens_per_sample': 32,
+        'min_tokens_per_sample': 8,
         'max_samples': 4000,
         'max_length': 512,
         'pissa': {
