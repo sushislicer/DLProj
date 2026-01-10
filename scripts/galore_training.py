@@ -6,6 +6,7 @@ Trains the PiSSA-extracted adapters using GaLore optimizer.
 from __future__ import annotations
 
 import os
+import itertools
 import torch
 import argparse
 import sys
@@ -260,16 +261,39 @@ class GaLoreTrainer:
         dataset_name = self.config.get('dataset', 'c4')
         dataset_split = self.config.get('dataset_split', 'train')
         max_samples = self.config.get('max_samples', 10000)
+        seed = int(self.config.get('seed', 42))
+
+        # Avoid multi-hour downloads on fresh machines.
+        # If using C4, default to streaming and materialize only the first N samples.
+        use_streaming = bool(self.config.get('dataset_streaming', True))
         
         try:
             # `datasets` has changed over time; prefer canonical dataset IDs.
-            # - `c4` often maps to `allenai/c4` but can emit warnings in newer versions.
-            # - We explicitly use `allenai/c4` to avoid legacy script issues.
+            # If using C4, use streaming by default to avoid downloading the full corpus.
             if str(dataset_name).lower() == 'c4':
-                dataset = load_dataset('allenai/c4', 'en', split=dataset_split)
+                if use_streaming:
+                    self.logger.info(f"Loading C4 via streaming and materializing max_samples={max_samples}")
+                    ds_stream = load_dataset('allenai/c4', 'en', split=dataset_split, streaming=True)
+                    # Shuffle within a small buffer for variety while staying fast.
+                    buf = int(self.config.get('dataset_shuffle_buffer', min(10_000, max(1, int(max_samples) * 5))))
+                    try:
+                        ds_stream = ds_stream.shuffle(seed=seed, buffer_size=buf)
+                    except Exception:
+                        pass
+                    rows = list(itertools.islice(ds_stream, int(max_samples)))
+                    try:
+                        from datasets import Dataset
+
+                        dataset = Dataset.from_list(rows)
+                    except Exception:
+                        # Fallback: keep as a python list-like dataset
+                        dataset = rows
+                else:
+                    dataset = load_dataset('allenai/c4', 'en', split=dataset_split)
             else:
                 dataset = load_dataset(dataset_name, split=dataset_split)
-            if max_samples and len(dataset) > max_samples:
+
+            if hasattr(dataset, '__len__') and max_samples and len(dataset) > max_samples:
                 dataset = dataset.select(range(max_samples))
         except Exception as e:
             self.logger.warning(f"Could not load dataset {dataset_name}: {e}")
@@ -314,6 +338,13 @@ class GaLoreTrainer:
                 tokens['labels'] = labels
             return tokens
         
+        # Tokenize dataset. If we ended up with a python list (streaming fallback),
+        # convert to a HF Dataset first.
+        if isinstance(dataset, list):
+            from datasets import Dataset
+
+            dataset = Dataset.from_list(dataset)
+
         tokenized_dataset = dataset.map(
             tokenize_function,
             batched=True,
