@@ -146,7 +146,7 @@ Run all benchmarks on all configured models:
 
 ```bash
 cd ~/DLProj
-python scripts/run_benchmarks.py
+python src/evaluation/runner.py
 ```
 
 ### Baseline comparison (native 4-bit quant + 4-bit LoRA / QLoRA-style adapter)
@@ -161,7 +161,7 @@ This is **opt-in** because it increases runtime.
 
 ```bash
 cd ~/DLProj
-python scripts/run_benchmarks.py --run_baselines
+python src/evaluation/runner.py --run_baselines
 ```
 
 For the LoRA/QLoRA baseline, ensure [`configs/benchmark_config.yaml`](../configs/benchmark_config.yaml:1)
@@ -171,35 +171,35 @@ sets `baselines.quantization_4bit_lora.adapter_path` to a valid adapter folder (
 
 ```bash
 cd ~/DLProj
-python scripts/run_benchmarks.py --model_sizes 0.5B 7B 32B
+python src/evaluation/runner.py --model_sizes 0.5B 7B 32B
 ```
 
 ### Run Specific Benchmarks
 
 ```bash
 cd ~/DLProj
-python scripts/run_benchmarks.py --benchmarks aime math gpqa
+python src/evaluation/runner.py --benchmarks aime math gpqa
 ```
 
 ### Custom Configuration
 
 ```bash
 cd ~/DLProj
-python scripts/run_benchmarks.py --config configs/benchmark_config.yaml
+python src/evaluation/runner.py --config configs/benchmark_config.yaml
 ```
 
 ### Custom Output Directory
 
 ```bash
 cd ~/DLProj
-python scripts/run_benchmarks.py --output_dir my_benchmark_results
+python src/evaluation/runner.py --output_dir my_benchmark_results
 ```
 
 ### Complete Example
 
 ```bash
 # Run AIME and MATH benchmarks on 7B and 32B models
-python scripts/run_benchmarks.py \
+python src/evaluation/runner.py \
   --model_sizes 7B 32B \
   --benchmarks aime math \
   --output_dir results/qwen_benchmarks
@@ -217,7 +217,7 @@ python scripts/run_benchmarks.py \
 
 **Example**:
 ```bash
-python scripts/run_benchmarks.py --benchmarks aime
+python src/evaluation/runner.py --benchmarks aime
 ```
 
 ### MATH
@@ -230,7 +230,7 @@ python scripts/run_benchmarks.py --benchmarks aime
 
 **Example**:
 ```bash
-python scripts/run_benchmarks.py --benchmarks math
+python src/evaluation/runner.py --benchmarks math
 ```
 
 ### LiveCodeBench
@@ -243,7 +243,7 @@ python scripts/run_benchmarks.py --benchmarks math
 
 **Example**:
 ```bash
-python scripts/run_benchmarks.py --benchmarks livecodebench
+python src/evaluation/runner.py --benchmarks livecodebench
 ```
 
 ### SWE-Bench (Software Engineering Benchmark)
@@ -256,7 +256,7 @@ python scripts/run_benchmarks.py --benchmarks livecodebench
 
 **Example**:
 ```bash
-python scripts/run_benchmarks.py --benchmarks swe_bench
+python src/evaluation/runner.py --benchmarks swe_bench
 ```
 
 ### GPQA (Graduate-Level Google-Proof Q&A)
@@ -269,7 +269,7 @@ python scripts/run_benchmarks.py --benchmarks swe_bench
 
 **Example**:
 ```bash
-python scripts/run_benchmarks.py --benchmarks gpqa
+python src/evaluation/runner.py --benchmarks gpqa
 ```
 
 ## Results and Reporting
@@ -393,20 +393,20 @@ download_aime_dataset('datasets/aime')
 Or download all supported benchmark datasets at once:
 
 ```bash
-python3 scripts/test_download.py
+python3 src/data/downloader.py
 ```
 
 Select specific datasets / output dir / token:
 
 ```bash
-python3 scripts/test_download.py --datasets aime math gpqa livecodebench --output_dir datasets
-python3 scripts/test_download.py --hf_token "$HF_TOKEN"
+python3 src/data/downloader.py --datasets aime math gpqa livecodebench --output_dir datasets
+python3 src/data/downloader.py --hf_token "$HF_TOKEN"
 ```
 
 If your machine cannot reach `huggingface.co` directly (common behind corporate firewalls or in some regions), use a Hub mirror endpoint:
 
 ```bash
-python3 scripts/test_download.py --hf_endpoint https://hf-mirror.com
+python3 src/data/downloader.py --hf_endpoint https://hf-mirror.com
 ```
 
 ### Notes on dataset availability
@@ -414,10 +414,10 @@ python3 scripts/test_download.py --hf_endpoint https://hf-mirror.com
 - Some dataset repo ids can change over time.
 - Some datasets (notably **GPQA**) may be **gated**, requiring a HuggingFace token.
 - The download helpers support overriding dataset ids via environment variables:
-  - `BENCH_MATH_HF_DATASET` (default: `hendrycks/competition_math`)
-  - `BENCH_AIME_HF_DATASET`
-  - `BENCH_GPQA_HF_DATASET`
-  - `BENCH_LIVECODEBENCH_HF_DATASET`
+  - `BENCH_MATH_HF_DATASET` (default: `qwedsacf/competition_math`)
+  - `BENCH_AIME_HF_DATASET` (default: `Maxwell-Jia/AIME_2024`)
+  - `BENCH_GPQA_HF_DATASET` (default: `idavidrein/gpqa-extended`)
+  - `BENCH_LIVECODEBENCH_HF_DATASET` (default: `livecodebench/code_generation_lite`)
 
 If a download returns 0 samples, rerun with `--hf_token` (for gated datasets) or set the appropriate `BENCH_*_HF_DATASET` variable to a valid mirror.
 
@@ -474,7 +474,7 @@ Process multiple benchmarks in parallel:
 
 ```bash
 # Run benchmarks in background
-nohup python scripts/run_benchmarks.py --model_sizes 7B > benchmark_7B.log 2>&1 &
+nohup python src/evaluation/runner.py --model_sizes 7B > benchmark_7B.log 2>&1 &
 
 # Monitor progress
 tail -f benchmark_7B.log

@@ -63,7 +63,7 @@ class QuantizationPipeline:
         
         # Build command
         cmd = [
-            sys.executable, 'scripts/pissa_extraction.py',
+            sys.executable, 'src/training/pissa.py',
             '--model_name', self.config['model_name'],
             '--output_dir', self.config['output_dir'],
             '--rank', str(self.config['pissa']['rank']),
@@ -104,14 +104,14 @@ class QuantizationPipeline:
         
         # Build command
         cmd = [
-            sys.executable, 'scripts/spinquant.py',
+            sys.executable, 'src/training/spinquant.py',
             '--residual_model_path', residual_model_path,
             '--output_dir', self.config['output_dir'],
             '--bits', str(self.config['spinquant']['bits'])
         ]
 
         # SpinQuant-lite backend selection.
-        # `scripts/spinquant.py` defaults to the fast fixed Hadamard path.
+        # `src/training/spinquant.py` defaults to the fast fixed Hadamard path.
         # Use `blockwise_givens` explicitly only if you want the slow learned-rotation backend.
         backend = str(self.config.get('spinquant', {}).get('backend', 'blockwise_givens'))
         cmd.extend(['--backend', backend])
@@ -182,7 +182,7 @@ class QuantizationPipeline:
         
         # Build command
         cmd = [
-            sys.executable, 'scripts/galore_training.py',
+            sys.executable, 'src/training/trainer.py',
             '--quantized_model_path', quantized_model_path,
             '--adapter_path', adapter_path,
             '--output_dir', self.config['output_dir'],
@@ -233,7 +233,7 @@ class QuantizationPipeline:
             cmd.extend(['--min_tokens_per_sample', str(self.config.get('min_tokens_per_sample'))])
 
         # Optional experiment tracking (W&B).
-        # `scripts/galore_training.py` is CLI-driven, so pass through pipeline_config knobs.
+        # `src/training/trainer.py` is CLI-driven, so pass through pipeline_config knobs.
         if bool(self.config.get('use_wandb', False)):
             cmd.append('--use_wandb')
             wb = self.config.get('wandb', {}) if isinstance(self.config.get('wandb', {}), dict) else {}

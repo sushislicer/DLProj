@@ -409,6 +409,7 @@ def download_livecodebench_dataset(output_path: str = 'datasets/livecodebench'):
         candidates = [
             dataset_id,
             # Commonly-referenced ids (availability may vary).
+            'livecodebench/code_generation_lite',
             'livecodebench/livecodebench',
             'livecodebench/LiveCodeBench',
         ]

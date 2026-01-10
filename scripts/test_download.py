@@ -4,10 +4,10 @@ This is used to ensure paper runs evaluate on real datasets (not synthetic
 fallback samples).
 
 Examples:
-  python3 scripts/test_download.py
-  python3 scripts/test_download.py --datasets aime math gpqa
-  python3 scripts/test_download.py --output_dir datasets
-  python3 scripts/test_download.py --hf_token "$HF_TOKEN"
+  python3 src/data/downloader.py
+  python3 src/data/downloader.py --datasets aime math gpqa
+  python3 src/data/downloader.py --output_dir datasets
+  python3 src/data/downloader.py --hf_token "$HF_TOKEN"
 """
 
 import argparse
