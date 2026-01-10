@@ -60,7 +60,14 @@ class LiveCodeBenchBenchmark(CodeExecutionBenchmark):
         if data:
             return data
 
-        self.logger.warning(f"Download failed, using sample data")
+        if not bool(self.config.get('allow_sample_data', True)):
+            raise FileNotFoundError(
+                f"LiveCodeBench dataset not found/downloadable at '{dataset_path}'. "
+                "Sample fallback is disabled (allow_sample_data=false). "
+                "Download datasets first (e.g., `python3 scripts/test_download.py`) or set a valid benchmarks.livecodebench.dataset_path."
+            )
+
+        self.logger.warning("Download failed, using sample data")
         return self._create_sample_dataset()
     
     def _create_sample_dataset(self) -> List[Dict]:

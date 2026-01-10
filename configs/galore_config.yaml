@@ -9,7 +9,8 @@ output_dir: "outputs/checkpoints"
 
 # GaLore Parameters
 rank: 128
-learning_rate: 1.0e-4
+# Cap GaLore LR for stability.
+learning_rate: 1.0e-5
 weight_decay: 0.01
 update_proj_gap: 200
 scale: 0.25

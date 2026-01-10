@@ -381,9 +381,19 @@ benchmarks:
 2. Place dataset in correct location
 3. Update dataset path in configuration
 
+**Important (paper runs)**:
+Some benchmark configs (e.g. [`configs/benchmark_config_4x5090.yaml`](configs/benchmark_config_4x5090.yaml:1)) set `allow_sample_data: false` to prevent silently falling back to tiny synthetic “sample datasets”.
+If a dataset is missing or can’t be downloaded, the run will now fail fast so you don’t accidentally report numbers computed on 5–10 toy items.
+
 ```python
 from benchmarks.aime_benchmark import download_aime_dataset
 download_aime_dataset('datasets/aime')
+```
+
+Or download all supported benchmark datasets at once:
+
+```bash
+python3 scripts/test_download.py
 ```
 
 ### Import Errors
