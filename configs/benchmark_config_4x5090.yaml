@@ -73,9 +73,9 @@ benchmarks:
     enabled: true
     dataset_path: "datasets/aime"
     # For small models (0.5B/7B), we can afford more samples for tighter CIs.
-    num_samples: 200
-    num_samples_14b: 50
-    num_samples_72b: 15
+    num_samples: 500
+    num_samples_14b: 100
+    num_samples_72b: 30
     max_length: 2048
     max_new_tokens: 192
     temperature: 0.0
@@ -92,9 +92,9 @@ benchmarks:
     enabled: true
     dataset_path: "datasets/math"
     # For small models (0.5B/7B), we can afford more samples for tighter CIs.
-    num_samples: 500
-    num_samples_14b: 120
-    num_samples_72b: 30
+    num_samples: 1000
+    num_samples_14b: 200
+    num_samples_72b: 50
     max_length: 2048
     max_new_tokens: 192
     temperature: 0.0
@@ -217,6 +217,6 @@ baselines:
 
 debug:
   enabled: false
-  use_debug_samples: true
+  use_debug_samples: false
   compare_baselines: true
-  debug_sample_size: 5
+  debug_sample_size: 50

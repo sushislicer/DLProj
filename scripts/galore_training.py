@@ -622,6 +622,7 @@ class GaLoreTrainer:
             weight_decay=self.config['galore'].get('weight_decay', 0.01),
             warmup_steps=self.config.get('warmup_steps', 100),
             logging_steps=self.config.get('logging_steps', 10),
+            logging_first_step=True,  # Log immediately
             save_steps=self.config.get('save_steps', 500),
             save_total_limit=self.config.get('save_total_limit', 3),
             fp16=True,
