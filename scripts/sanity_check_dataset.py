@@ -31,15 +31,26 @@ def main():
         dataset = load_dataset(dataset_name, dataset_config, split=split)
     except Exception as e:
         print(f"Failed to load dataset: {e}")
-        # Try fallback
-        print("Trying fallback to wikitext-2-raw-v1...")
-        try:
-            dataset = load_dataset(dataset_name, "wikitext-2-raw-v1", split=split)
-        except Exception as e2:
-            print(f"Fallback failed: {e2}")
-            return
+        return
 
     print(f"Dataset size: {len(dataset)}")
+    
+    # Check raw-v1 as well
+    print("\n--- Checking wikitext-2-raw-v1 ---")
+    try:
+        dataset_raw = load_dataset(dataset_name, "wikitext-2-raw-v1", split=split)
+        print(f"Raw dataset size: {len(dataset_raw)}")
+        print(f"First sample raw: {repr(dataset_raw[0]['text'][:100])}")
+        
+        # Check empty lines in raw
+        empty_raw = 0
+        for i in range(min(1000, len(dataset_raw))):
+            if not dataset_raw[i]['text'].strip():
+                empty_raw += 1
+        print(f"Empty lines in raw (first 1000): {empty_raw}")
+    except Exception as e:
+        print(f"Failed to load raw dataset: {e}")
+    print("------------------------------------\n")
     if len(dataset) > 0:
         print(f"First sample keys: {dataset[0].keys()}")
         if 'text' in dataset[0]:
