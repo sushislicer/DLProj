@@ -396,6 +396,13 @@ Or download all supported benchmark datasets at once:
 python3 scripts/test_download.py
 ```
 
+Select specific datasets / output dir / token:
+
+```bash
+python3 scripts/test_download.py --datasets aime math gpqa livecodebench --output_dir datasets
+python3 scripts/test_download.py --hf_token "$HF_TOKEN"
+```
+
 ### Import Errors
 
 **Problem**: Module not found errors

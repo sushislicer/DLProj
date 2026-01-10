@@ -52,7 +52,14 @@ class SWEBenchBenchmark(CodeExecutionBenchmark):
                         data.extend(json.load(f))
                 return data
         
-        # If no dataset found, create sample data
+        # If no dataset found, either fail-fast (paper runs) or fall back to sample data.
+        if not bool(self.config.get('allow_sample_data', True)):
+            raise FileNotFoundError(
+                f"SWE-Bench dataset not found at '{dataset_path}'. "
+                "Sample fallback is disabled (allow_sample_data=false). "
+                "Download datasets first (e.g., `python3 scripts/test_download.py`) or set a valid benchmarks.swe_bench.dataset_path."
+            )
+
         self.logger.warning(f"SWE-Bench dataset not found at {dataset_path}, using sample data")
         return self._create_sample_dataset()
     
