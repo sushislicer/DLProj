@@ -403,6 +403,12 @@ python3 scripts/test_download.py --datasets aime math gpqa livecodebench --outpu
 python3 scripts/test_download.py --hf_token "$HF_TOKEN"
 ```
 
+If your machine cannot reach `huggingface.co` directly (common behind corporate firewalls or in some regions), use a Hub mirror endpoint:
+
+```bash
+python3 scripts/test_download.py --hf_endpoint https://hf-mirror.com
+```
+
 ### Notes on dataset availability
 
 - Some dataset repo ids can change over time.

@@ -47,7 +47,19 @@ def main() -> None:
         default=None,
         help='Optional HuggingFace token (sets HF_TOKEN + HUGGINGFACE_HUB_TOKEN for this process)',
     )
+    ap.add_argument(
+        '--hf_endpoint',
+        type=str,
+        default=None,
+        help=(
+            'Optional HuggingFace Hub endpoint (sets HF_ENDPOINT). '
+            'Useful in restricted networks / mirrors (e.g., https://hf-mirror.com).'
+        ),
+    )
     args = ap.parse_args()
+
+    if args.hf_endpoint:
+        os.environ.setdefault('HF_ENDPOINT', str(args.hf_endpoint))
 
     if args.hf_token:
         os.environ.setdefault('HF_TOKEN', str(args.hf_token))
