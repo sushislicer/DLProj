@@ -34,28 +34,56 @@ _LOCAL_PREFIXES = (
     "offload/",
 )
 
+# First path component roots we consider "definitely local" when given as a
+# workspace-relative path (even if the path does not exist yet).
+_LOCAL_ROOTS = tuple(p.rstrip("/") for p in _LOCAL_PREFIXES)
+
+
+def _normalize_user_path(v: str) -> str:
+    """Normalize a user-provided artifact locator (path or repo id)."""
+    s = str(v).strip().replace("\\", "/")
+    # Strip leading './' repeatedly (common in configs/CLI).
+    while s.startswith("./"):
+        s = s[2:]
+    return s
+
 
 def is_probably_hf_repo_id(value: str) -> bool:
-    v = str(value).strip()
-    if not v:
+    """Heuristic: decide if `value` is a HuggingFace Hub repo id.
+
+    We intentionally bias towards treating ambiguous strings as *local* so we
+    don't accidentally attempt Hub downloads for workspace paths like
+    `outputs/lora_adapters`.
+    """
+    v_raw = str(value).strip()
+    if not v_raw:
         return False
+
+    v_norm = _normalize_user_path(v_raw)
 
     # Treat common workspace-relative prefixes as local paths even if they don't
     # exist yet (e.g., will be created by a previous pipeline stage).
-    v_norm = v.replace("\\", "/")
     for p in _LOCAL_PREFIXES:
         if v_norm.startswith(p):
             return False
 
+    # Also treat "<local_root>/<...>" as local even if the prefix list changes.
+    # Example: "outputs/lora_adapters".
+    first = v_norm.split("/", 1)[0] if "/" in v_norm else v_norm
+    if first in _LOCAL_ROOTS:
+        return False
+
     # Clearly local-ish patterns.
-    if v.startswith(("/", "./", "../")):
+    if v_raw.startswith(("/", "./", "../")):
         return False
-    if ":\\" in v or v.startswith("\\"):
+    if ":\\" in v_raw or v_raw.startswith("\\"):
         return False
+
     # If it exists locally, treat as local.
-    if os.path.exists(v):
+    if os.path.exists(v_raw) or os.path.exists(v_norm):
         return False
-    return bool(_REPO_RE.match(v))
+
+    return bool(_REPO_RE.match(v_norm))
 
 
 def split_repo_and_revision(repo: str) -> Tuple[str, Optional[str]]:

@@ -222,7 +222,15 @@ class QuantizationPipeline:
             cmd.extend(['--proj_drift_threshold', str(proj_cfg.get('drift_threshold', 0.35))])
         
         if 'dataset' in self.config:
-            cmd.extend(['--dataset', self.config['dataset']])
+            cmd.extend(['--dataset', str(self.config['dataset'])])
+        if 'dataset_split' in self.config:
+            cmd.extend(['--dataset_split', str(self.config['dataset_split'])])
+        if 'dataset_config' in self.config and self.config.get('dataset_config'):
+            cmd.extend(['--dataset_config', str(self.config['dataset_config'])])
+        if self.config.get('dataset_streaming', True) is False:
+            cmd.append('--no_dataset_streaming')
+        if 'min_tokens_per_sample' in self.config:
+            cmd.extend(['--min_tokens_per_sample', str(self.config.get('min_tokens_per_sample'))])
         
         self.logger.info(f"Running command: {' '.join(cmd)}")
         
@@ -339,9 +347,14 @@ def create_default_config():
         'max_steps': 800,
         # NOTE: This dataset is for *adapter training* in the pipeline.
         # Benchmark datasets (AIME/MATH/GPQA/...) are configured separately.
-        'dataset': 'c4',
-        'max_samples': 2000,
-        'max_length': 256,
+        # Use a dense small dataset by default to avoid hours-long downloads.
+        'dataset': 'wikitext',
+        'dataset_config': 'wikitext-2-v1',
+        'dataset_split': 'train',
+        'dataset_streaming': False,
+        'min_tokens_per_sample': 32,
+        'max_samples': 4000,
+        'max_length': 512,
         'pissa': {
             'rank': 64,
             'alpha': 128,

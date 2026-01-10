@@ -1,0 +1,399 @@
+{
+  "config": {
+    "models": [
+      {
+        "name": "Qwen/Qwen2.5-0.5B-Instruct",
+        "size": "0.5B",
+        "max_length": 2048,
+        "batch_size": 16,
+        "max_batch_size": 32,
+        "min_batch_size": 8,
+        "quantization": "4bit",
+        "skip_benchmarks": [],
+        "reduced_samples": false
+      },
+      {
+        "name": "Qwen/Qwen2.5-7B-Instruct",
+        "size": "7B",
+        "max_length": 4096,
+        "batch_size": 4,
+        "max_batch_size": 8,
+        "min_batch_size": 2,
+        "quantization": "4bit",
+        "skip_benchmarks": [],
+        "reduced_samples": false
+      },
+      {
+        "name": "Qwen/Qwen2.5-14B-Instruct",
+        "size": "14B",
+        "max_length": 4096,
+        "batch_size": 4,
+        "max_batch_size": 8,
+        "min_batch_size": 2,
+        "quantization": "4bit",
+        "skip_benchmarks": [
+          "swe_bench"
+        ],
+        "reduced_samples": true,
+        "debug_samples": 3,
+        "use_dynamic_batching": true,
+        "early_stopping": true,
+        "optimize_generation": true,
+        "aggressive_optimization": true
+      },
+      {
+        "name": "Qwen/Qwen2.5-72B-Instruct",
+        "size": "72B",
+        "max_length": 4096,
+        "batch_size": 2,
+        "max_batch_size": 4,
+        "min_batch_size": 1,
+        "quantization": "4bit",
+        "skip_benchmarks": [
+          "swe_bench",
+          "livecodebench"
+        ],
+        "reduced_samples": true,
+        "debug_samples": 2,
+        "use_dynamic_batching": true,
+        "early_stopping": true,
+        "optimize_generation": true,
+        "aggressive_optimization": true
+      }
+    ],
+    "gpu": {
+      "num_gpus": 1,
+      "device_map": "auto",
+      "torch_dtype": "float16",
+      "trust_remote_code": true,
+      "quantization": {
+        "enabled": true,
+        "bits": 4,
+        "quant_type": "nf4",
+        "double_quant": true,
+        "compute_dtype": "float16",
+        "use_flash_attention": false,
+        "adapter_precision": "float16"
+      }
+    },
+    "benchmarks": {
+      "aime": {
+        "enabled": false,
+        "dataset_path": "datasets/aime",
+        "num_samples": 100,
+        "num_samples_14b": 25,
+        "num_samples_72b": 15,
+        "debug_samples": 5,
+        "max_length": 2048,
+        "max_new_tokens": 128,
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "top_k": 1,
+        "num_beams": 1,
+        "do_sample": false,
+        "metrics": [
+          "accuracy",
+          "pass_at_1",
+          "memory_usage",
+          "inference_time",
+          "throughput"
+        ],
+        "evaluation_type": "exact_match",
+        "timeout": 60,
+        "early_stopping_tokens": [
+          "Answer:",
+          "Therefore",
+          "The answer is"
+        ]
+      },
+      "math": {
+        "enabled": false,
+        "dataset_path": "datasets/math",
+        "num_samples": 250,
+        "num_samples_14b": 50,
+        "num_samples_72b": 30,
+        "debug_samples": 5,
+        "max_length": 2048,
+        "max_new_tokens": 128,
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "top_k": 1,
+        "num_beams": 1,
+        "do_sample": false,
+        "metrics": [
+          "accuracy",
+          "pass_at_1",
+          "memory_usage",
+          "inference_time",
+          "throughput"
+        ],
+        "evaluation_type": "exact_match",
+        "timeout": 60,
+        "early_stopping_tokens": [
+          "Answer:",
+          "Therefore",
+          "Final answer",
+          "The answer is"
+        ]
+      },
+      "livecodebench": {
+        "enabled": false,
+        "dataset_path": "datasets/livecodebench",
+        "num_samples": 100,
+        "num_samples_14b": 15,
+        "num_samples_72b": 10,
+        "debug_samples": 3,
+        "max_length": 4096,
+        "max_new_tokens": 256,
+        "temperature": 0.2,
+        "top_p": 0.95,
+        "top_k": 50,
+        "num_beams": 1,
+        "do_sample": true,
+        "metrics": [
+          "pass_rate",
+          "pass_at_1",
+          "memory_usage",
+          "inference_time",
+          "throughput"
+        ],
+        "evaluation_type": "code_execution",
+        "timeout": 60,
+        "timeout_72b": 45,
+        "num_test_cases": 3,
+        "num_test_cases_72b": 2,
+        "early_stopping_tokens": [
+          "```",
+          "def ",
+          "class "
+        ],
+        "early_stopping_tokens_72b": [
+          "```",
+          "def ",
+          "class "
+        ]
+      },
+      "swe_bench": {
+        "enabled": false,
+        "dataset_path": "datasets/swe_bench",
+        "num_samples": 50,
+        "num_samples_14b": 10,
+        "num_samples_72b": 5,
+        "debug_samples": 2,
+        "max_length": 4096,
+        "temperature": 0.2,
+        "top_p": 0.95,
+        "top_k": 50,
+        "num_beams": 1,
+        "do_sample": true,
+        "metrics": [
+          "resolved_rate",
+          "pass_at_1",
+          "memory_usage",
+          "inference_time",
+          "throughput"
+        ],
+        "evaluation_type": "patch_execution",
+        "timeout": 300,
+        "max_retries": 2
+      },
+      "gpqa": {
+        "enabled": true,
+        "dataset_path": "datasets/gpqa",
+        "num_samples": 200,
+        "num_samples_14b": 50,
+        "num_samples_72b": 30,
+        "debug_samples": 5,
+        "max_length": 2048,
+        "max_new_tokens": 64,
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "top_k": 1,
+        "num_beams": 1,
+        "do_sample": false,
+        "metrics": [
+          "accuracy",
+          "pass_at_1",
+          "memory_usage",
+          "inference_time",
+          "throughput"
+        ],
+        "evaluation_type": "multiple_choice",
+        "timeout": 60,
+        "early_stopping_tokens": [
+          "Answer:",
+          "The answer is",
+          "Therefore"
+        ]
+      }
+    },
+    "generation": {
+      "max_new_tokens": 256,
+      "min_new_tokens": 1,
+      "repetition_penalty": 1.0,
+      "length_penalty": 1.0,
+      "early_stopping": true,
+      "pad_token_id": null
+    },
+    "evaluation": {
+      "num_workers": 8,
+      "cache_dir": "cache",
+      "save_predictions": true,
+      "save_intermediate_results": true,
+      "verbose": true,
+      "parallel_evaluation": true
+    },
+    "output": {
+      "base_dir": "benchmark_results",
+      "format": "json",
+      "include_timestamp": true,
+      "include_model_info": true,
+      "include_system_info": true
+    },
+    "logging": {
+      "log_dir": "logs/benchmark",
+      "level": "INFO",
+      "log_to_file": true,
+      "log_to_console": true,
+      "tensorboard": {
+        "enabled": true,
+        "log_dir": "logs/tensorboard"
+      },
+      "wandb": {
+        "enabled": true,
+        "mode": "online",
+        "project": "DLProj",
+        "entity": "yangchen0305",
+        "run_name": null,
+        "tags": []
+      }
+    },
+    "performance": {
+      "track_memory": true,
+      "track_latency": true,
+      "track_throughput": true,
+      "log_interval": 5
+    },
+    "error_handling": {
+      "max_retries": 2,
+      "retry_delay": 3,
+      "continue_on_error": true,
+      "save_failed_samples": true
+    },
+    "advanced": {
+      "use_flash_attention": false,
+      "auto_install_flash_attention": false,
+      "use_cache": true,
+      "gradient_checkpointing": false,
+      "low_cpu_mem_usage": true,
+      "device_map_options": {
+        "max_memory": null,
+        "no_split_module_classes": null,
+        "offload_folder": "offload",
+        "offload_state_dict": false
+      },
+      "multi_gpu": {
+        "enable_model_parallel": true,
+        "enable_pipeline_parallel": false,
+        "enable_tensor_parallel": true,
+        "reduce_bucket_size": "5e8",
+        "bucket_size": "5e7"
+      }
+    },
+    "execution": {
+      "max_execution_time": 4,
+      "enable_time_budget": true,
+      "skip_slow_benchmarks": true,
+      "benchmark_priority": [
+        "gpqa",
+        "aime",
+        "math",
+        "livecodebench",
+        "swe_bench"
+      ],
+      "model_priority": [
+        "0.5B",
+        "7B",
+        "14B",
+        "72B"
+      ]
+    },
+    "baselines": {
+      "pipeline_4bit": {
+        "enabled": true,
+        "name": "Pipeline (Ours) 4-bit",
+        "description": "Base model in 4-bit + our pipeline adapters (if provided)",
+        "adapter_path": null
+      },
+      "quantization_4bit": {
+        "enabled": true,
+        "name": "4-bit Quantization (No Adapters)",
+        "description": "Base model with 4-bit quantization, no LoRA adapters",
+        "quantization": "4bit",
+        "use_adapters": false
+      },
+      "quantization_4bit_lora": {
+        "enabled": true,
+        "name": "4-bit Quantization + LoRA (Baseline)",
+        "description": "Base model with 4-bit quantization and LoRA adapters baseline",
+        "quantization": "4bit",
+        "use_adapters": true,
+        "adapter_path": "outputs/lora_adapters",
+        "adapter_config": {
+          "r": 16,
+          "lora_alpha": 32,
+          "lora_dropout": 0.05,
+          "target_modules": [
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_proj",
+            "up_proj",
+            "down_proj"
+          ]
+        }
+      },
+      "full_precision": {
+        "enabled": false,
+        "name": "Full Precision (No Quantization)",
+        "description": "Base model in full precision, no quantization",
+        "quantization": "none",
+        "use_adapters": false
+      }
+    },
+    "debug": {
+      "enabled": true,
+      "use_debug_samples": true,
+      "verbose": true,
+      "save_predictions": true,
+      "compare_baselines": true,
+      "debug_sample_size": 3,
+      "run_baselines_in_debug": true
+    }
+  },
+  "system_info": {
+    "timestamp": "2026-01-10T10:46:48.654466",
+    "python_version": "3.10.12 (main, Nov  4 2025, 08:48:33) [GCC 11.4.0]",
+    "torch_version": "2.1.1+cu121",
+    "cuda_version": "12.1",
+    "cuda_available": true,
+    "num_gpus": 1,
+    "gpu_info": [
+      {
+        "device_id": 0,
+        "name": "NVIDIA GeForce RTX 3060 Laptop GPU",
+        "total_memory": "6.00 GB",
+        "compute_capability": "8.6"
+      }
+    ]
+  },
+  "benchmarks": {
+    "0.5B": {
+      "error": "Failed to import transformers due to a torch/transformers version mismatch.\nYour torch is too old for the installed transformers.\n\nFix:\n- Install/upgrade a GPU-compatible torch wheel using `python3 scripts/fix_torch.py --reinstall --channel nightly` (RTX 50xx)\n  or reinstall a stable CUDA torch for your driver, then re-run `pip install -r requirements.txt`.\nOriginal error: module 'torch.utils._pytree' has no attribute 'register_pytree_node'",
+      "status": "failed"
+    }
+  },
+  "total_elapsed_time": 0.19158434867858887,
+  "total_formatted_time": "0s"
+}

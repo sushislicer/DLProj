@@ -379,7 +379,59 @@ class GaLoreTrainer:
             batched=True,
             remove_columns=dataset.column_names
         )
-        
+
+        # Convert tokenized documents into dense fixed-length LM blocks.
+        # This avoids pathological cases where many examples are 0-1 tokens
+        # (e.g., empty lines in WikiText), which can yield loss=0 because there
+        # are no next-token targets.
+        block_size = int(self.config.get('max_length', 512))
+        min_tok = int(self.config.get('min_tokens_per_sample', min(32, max(2, block_size // 8))))
+
+        def _filter_short(ex):
+            ids = ex.get('input_ids')
+            if not isinstance(ids, list):
+                return False
+            return len(ids) >= min_tok
+
+        try:
+            tokenized_dataset = tokenized_dataset.filter(_filter_short)
+        except Exception:
+            pass
+
+        def group_texts(examples):
+            # Concatenate then split into fixed-size chunks.
+            concatenated = {}
+            for k, v in examples.items():
+                if isinstance(v, list) and v and isinstance(v[0], list):
+                    concatenated[k] = sum(v, [])
+
+            if 'input_ids' not in concatenated:
+                return {'input_ids': [], 'attention_mask': []}
+
+            total_length = len(concatenated['input_ids'])
+            if total_length < block_size:
+                # Not enough tokens to form a single block.
+                return {k: [] for k in concatenated.keys()}
+
+            total_length = (total_length // block_size) * block_size
+            result = {
+                k: [t[i : i + block_size] for i in range(0, total_length, block_size)]
+                for k, t in concatenated.items()
+            }
+            return result
+
+        try:
+            lm_dataset = tokenized_dataset.map(group_texts, batched=True)
+            if hasattr(lm_dataset, '__len__') and len(lm_dataset) > 0:
+                tokenized_dataset = lm_dataset
+            else:
+                self.logger.warning(
+                    f"Tokenized dataset became empty after grouping into blocks (block_size={block_size}). "
+                    "Falling back to ungrouped tokenized samples."
+                )
+        except Exception as e:
+            self.logger.warning(f"Failed to group texts into blocks; continuing with ungrouped samples. ({e})")
+
         self.logger.info(f"Dataset prepared with {len(tokenized_dataset)} examples")
         self.memory_tracker.log_memory("GaLore", "Dataset prepared")
         return tokenized_dataset
@@ -954,8 +1006,12 @@ def main():
         '--dataset',
         type=str,
         default='c4',
-        help='Dataset name'
+        help='Dataset name (e.g., c4, wikitext, openwebtext)'
     )
+    parser.add_argument('--dataset_split', type=str, default='train', help='Dataset split (train/validation/test)')
+    parser.add_argument('--dataset_config', type=str, default=None, help='Optional dataset config/subset (e.g., wikitext-2-v1)')
+    parser.add_argument('--no_dataset_streaming', action='store_true', help='Disable dataset streaming (C4 uses streaming otherwise)')
+    parser.add_argument('--min_tokens_per_sample', type=int, default=32, help='Filter out samples shorter than this many tokens (avoids loss=0)')
 
     parser.add_argument('--max_samples', type=int, default=2000, help='Max training samples (cap for speed)')
     parser.add_argument('--max_length', type=int, default=256, help='Max sequence length for training (cap for speed)')
@@ -993,7 +1049,10 @@ def main():
         'output_dir': args.output_dir,
         'seed': 42,
         'dataset': args.dataset,
-        'dataset_split': 'train',
+        'dataset_split': str(args.dataset_split),
+        'dataset_config': (str(args.dataset_config) if args.dataset_config else None),
+        'dataset_streaming': (not bool(args.no_dataset_streaming)),
+        'min_tokens_per_sample': int(args.min_tokens_per_sample),
         'max_samples': int(args.max_samples),
         'max_length': int(args.max_length),
         'num_epochs': args.num_epochs,

@@ -415,6 +415,56 @@ With 4-bit quantization on 4 GPUs:
 
 ## Troubleshooting
 
+### Common "adapter" failures (and fixes)
+
+#### 1) Local adapter paths accidentally treated as HuggingFace repos
+
+If `baselines.quantization_4bit_lora.adapter_path` is a workspace path like
+`outputs/lora_adapters`, older logic could mis-detect it as a Hub repo id and
+try to download it (leading to `401` / `Repo not found`).
+
+Fix: local-looking workspace paths are now forced to be treated as local by
+[`utils.hf_download.is_probably_hf_repo_id()`](utils/hf_download.py:51).
+
+#### 2) PiSSA adapters failing to load on a 4-bit base model
+
+When the base model is loaded with bitsandbytes 4-bit modules, PEFT can throw:
+
+> `Please initialize PiSSA under float32, float16, or bfloat16...`
+
+This happens because some saved PiSSA adapters keep `init_lora_weights="pissa"`
+in `adapter_config.json`, which triggers PiSSA init during adapter injection.
+For benchmarking/inference we only want to *load* the adapter weights, not
+re-initialize them.
+
+Fix: the benchmark loader now patches **local** `adapter_config.json` to disable
+PiSSA init when running on a quantized base
+([`BenchmarkRunner.load_model()`](scripts/run_benchmarks.py:375)).
+
+### Why results can look "terrible" (0% / noisy accuracy)
+
+Typical causes in this repo:
+
+1. **Too few eval samples** (debug defaults or aggressive reductions). With
+   `num_samples` in the single digits, accuracy is dominated by noise.
+   Use larger sample counts in [`configs/benchmark_config.yaml`](configs/benchmark_config.yaml:1).
+
+2. **Adapters not actually trained** (loss/grad_norm ~ 0). This can happen if
+   the pipeline training dataset has lots of very short/empty samples (e.g.
+   WikiText empty lines) and you end up with no next-token targets.
+   The GaLore trainer now filters short samples and groups into dense blocks
+   ([`GaLoreTrainer.prepare_dataset()`](scripts/galore_training.py:250)).
+
+3. **Dataset fallbacks**. Some benchmarks fall back to tiny sample datasets if
+   `datasets/<name>` is missing, which can skew results.
+
+4. **Quantization mismatch**. 4-bit weight quantization is great for speed/VRAM,
+   but can hurt quality if the model is pushed too hard (long contexts, hard
+   math/code tasks). Consider:
+   - higher compute dtype (`bnb_4bit_compute_dtype=bfloat16`)
+   - disabling double-quant
+   - using a larger model / more steps for adapter training
+
 ### Out of Memory Errors
 
 Reduce batch size or use more GPUs:

@@ -86,9 +86,9 @@ benchmarks:
   aime:
     enabled: true
     dataset_path: "datasets/aime"
-    num_samples: 50  # Reduced from 250 for faster execution
-    num_samples_14b: 10  # Further reduced for 14B model (was 15)
-    num_samples_72b: 8  # Aggressively reduced for 72B model (was 20)
+    num_samples: 100  # Increased for more stable accuracy estimates
+    num_samples_14b: 25
+    num_samples_72b: 15
     debug_samples: 5  # Small sample for debugging mode
     max_length: 2048
     max_new_tokens: 128  # Reduced from 256 for faster generation
@@ -112,9 +112,9 @@ benchmarks:
   math:
     enabled: true
     dataset_path: "datasets/math"
-    num_samples: 100  # Reduced from 5000 for faster execution
-    num_samples_14b: 15  # Further reduced for 14B model (was 25)
-    num_samples_72b: 10  # Aggressively reduced for 72B model (was 30)
+    num_samples: 250
+    num_samples_14b: 50
+    num_samples_72b: 30
     debug_samples: 5  # Small sample for debugging mode
     max_length: 2048
     max_new_tokens: 128  # Reduced from 256 for faster generation
@@ -138,9 +138,9 @@ benchmarks:
   livecodebench:
     enabled: true
     dataset_path: "datasets/livecodebench"
-    num_samples: 50  # Reduced from 500 for faster execution
-    num_samples_14b: 5  # Aggressively reduced for 14B model (was 10)
-    num_samples_72b: 3  # Aggressively reduced for 72B model (was 10)
+    num_samples: 100
+    num_samples_14b: 15
+    num_samples_72b: 10
     debug_samples: 3  # Small sample for debugging mode
     max_length: 4096
     max_new_tokens: 256  # Reduced for 14B optimization
@@ -169,9 +169,9 @@ benchmarks:
   swe_bench:
     enabled: true
     dataset_path: "datasets/swe_bench"
-    num_samples: 30  # Reduced from 300 for faster execution
-    num_samples_14b: 5  # Further reduced for 14B model (was 10)
-    num_samples_72b: 3  # Aggressively reduced for 72B model (was 5)
+    num_samples: 50
+    num_samples_14b: 10
+    num_samples_72b: 5
     debug_samples: 2  # Small sample for debugging mode
     max_length: 4096
     temperature: 0.2
@@ -193,9 +193,9 @@ benchmarks:
   gpqa:
     enabled: true
     dataset_path: "datasets/gpqa"
-    num_samples: 100  # Reduced from 548 for faster execution
-    num_samples_14b: 15  # Further reduced for 14B model (was 25)
-    num_samples_72b: 8  # Aggressively reduced for 72B model (was 30)
+    num_samples: 200
+    num_samples_14b: 50
+    num_samples_72b: 30
     debug_samples: 5  # Small sample for debugging mode
     max_length: 2048
     max_new_tokens: 64  # Reduced for multiple choice (shorter answers needed)

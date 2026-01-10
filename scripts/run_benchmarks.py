@@ -246,7 +246,95 @@ class BenchmarkRunner:
         self.logger.info(f"Quantization config: {bits}-bit, {quant_config.get('quant_type', 'nf4')}, double_quant={quant_config.get('double_quant', True)}")
         
         return bnb_config
-    
+
+    def _model_uses_bnb_quant(self, m: torch.nn.Module) -> bool:
+        """Best-effort detection of bitsandbytes-quantized modules."""
+        for _n, mod in m.named_modules():
+            cls_name = mod.__class__.__name__
+            cls_mod = mod.__class__.__module__
+            if 'bitsandbytes' in cls_mod:
+                return True
+            if cls_name in ("Linear4bit", "Linear8bitLt"):
+                return True
+        return False
+
+    def _adapter_target_dtype(self) -> torch.dtype:
+        """Select dtype for adapter weights during benchmarking.
+
+        We avoid 8-bit adapter tensors; adapters should remain fp16/bf16/fp32.
+        """
+        # Prefer explicit adapter precision knob.
+        qcfg = self.config.get('gpu', {}).get('quantization', {})
+        prec = str(qcfg.get('adapter_precision') or '').strip().lower()
+        if prec in ('float16', 'fp16', 'half'):
+            return torch.float16
+        if prec in ('bfloat16', 'bf16'):
+            return torch.bfloat16
+        if prec in ('float32', 'fp32'):
+            return torch.float32
+
+        # Fall back to global torch_dtype.
+        dtype_str = str(self.config.get('gpu', {}).get('torch_dtype', 'float16')).strip().lower()
+        if dtype_str == 'bfloat16':
+            return torch.bfloat16
+        if dtype_str == 'float32':
+            return torch.float32
+        return torch.float16
+
+    def _cast_adapter_params_(self, model: torch.nn.Module, dtype: torch.dtype) -> None:
+        """Cast LoRA/PiSSA parameters to a consistent float dtype."""
+        try:
+            for n, p in model.named_parameters():
+                nl = n.lower()
+                if ('lora' in nl) or ('pissa' in nl):
+                    if hasattr(p, 'data') and p.data is not None and p.data.dtype != dtype:
+                        p.data = p.data.to(dtype=dtype)
+        except Exception:
+            pass
+
+    def _maybe_patch_pissa_adapter_config_for_quantized_base_(self, adapter_dir: str) -> bool:
+        """Patch a local PEFT adapter config to avoid PiSSA init on 4-bit base.
+
+        PEFT's PiSSA init reads the *base* weights and errors if the base model
+        uses bitsandbytes Linear4bit/8bit modules. When loading an already-saved
+        PiSSA adapter for inference/benchmarking, we don't need PiSSA init at all
+        because weights are loaded from the adapter state dict.
+
+        We therefore replace init_lora_weights="pissa" with init_lora_weights=true
+        in adapter_config.json for local adapters.
+        """
+        cfg_path = os.path.join(str(adapter_dir), 'adapter_config.json')
+        if not os.path.isfile(cfg_path):
+            return False
+
+        try:
+            with open(cfg_path, 'r') as f:
+                cfg = json.load(f)
+        except Exception:
+            return False
+
+        init = cfg.get('init_lora_weights', None)
+        if str(init).strip().lower() != 'pissa':
+            return False
+
+        # Back up once.
+        bak_path = cfg_path + '.bak_pissa'
+        try:
+            if not os.path.exists(bak_path):
+                with open(bak_path, 'w') as f:
+                    json.dump(cfg, f, indent=2)
+        except Exception:
+            pass
+
+        cfg['init_lora_weights'] = True
+        cfg['_patched_disable_pissa_init_for_quantized_base'] = True
+        try:
+            with open(cfg_path, 'w') as f:
+                json.dump(cfg, f, indent=2)
+            return True
+        except Exception:
+            return False
+
     def _setup_output_dir(self) -> str:
         """Setup output directory with timestamp."""
         base_dir = self.config['output']['base_dir']
@@ -427,8 +515,21 @@ class BenchmarkRunner:
             except Exception as e:
                 raise ImportError("peft is required to load adapters. Install `peft`.\n" + str(e))
 
+            # PiSSA adapters saved with init_lora_weights="pissa" will trigger PiSSA init
+            # during adapter injection, which errors on bitsandbytes 4/8-bit Linear modules.
+            # For benchmarking, we patch local adapter_config.json to disable PiSSA init.
+            if os.path.isdir(str(adapter_path)) and self._model_uses_bnb_quant(model):
+                if self._maybe_patch_pissa_adapter_config_for_quantized_base_(str(adapter_path)):
+                    self.logger.warning(
+                        f"Patched adapter_config.json to disable PiSSA init for quantized base: {adapter_path}"
+                    )
+
             self.logger.info(f"Loading adapters from: {adapter_path}")
             model = PeftModel.from_pretrained(model, adapter_path, is_trainable=False)
+
+            # Keep adapters in fp16/bf16/fp32 (avoid accidental 8-bit adapter tensors).
+            self._cast_adapter_params_(model, self._adapter_target_dtype())
+
             model.eval()
         
         # Ensure eval mode for benchmarking.
