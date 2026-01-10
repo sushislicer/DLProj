@@ -60,11 +60,13 @@ pissa:
 
 # SpinQuant Configuration
 spinquant:
-  bits: 8  # Options: 4, 8
+  bits: 4  # Match benchmark config
   # Keep some rotation effect without per-layer optimization taking forever.
   # Use Hadamard (fast, fixed) instead of learned Givens sweeps.
   backend: "hadamard"
-  skip_rotations: false
+  # CRITICAL: Disable rotations because PiSSA adapters are not rotated.
+  # Mixing rotated base + unrotated adapters destroys accuracy.
+  skip_rotations: true
   double_quant: true
   quant_type: "nf4"  # Options: "nf4", "fp4"
   group_size: 128
@@ -97,8 +99,9 @@ distill:
   temperature: 2.0
 
 # GaLore-like gradient projection (projection-space updates)
+# Disabled to avoid interference with standard GaLore optimizer
 projection:
-  enabled: true
+  enabled: false
   rank: 64
   update_gap: 200
   drift_threshold: 0.35
