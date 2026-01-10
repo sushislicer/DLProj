@@ -231,6 +231,18 @@ class QuantizationPipeline:
             cmd.append('--no_dataset_streaming')
         if 'min_tokens_per_sample' in self.config:
             cmd.extend(['--min_tokens_per_sample', str(self.config.get('min_tokens_per_sample'))])
+
+        # Optional experiment tracking (W&B).
+        # `scripts/galore_training.py` is CLI-driven, so pass through pipeline_config knobs.
+        if bool(self.config.get('use_wandb', False)):
+            cmd.append('--use_wandb')
+            wb = self.config.get('wandb', {}) if isinstance(self.config.get('wandb', {}), dict) else {}
+            if wb.get('project'):
+                cmd.extend(['--wandb_project', str(wb['project'])])
+            if wb.get('entity'):
+                cmd.extend(['--wandb_entity', str(wb['entity'])])
+            if wb.get('mode'):
+                cmd.extend(['--wandb_mode', str(wb['mode'])])
         
         self.logger.info(f"Running command: {' '.join(cmd)}")
         

@@ -342,23 +342,32 @@ class GaLoreTrainer:
                 # Apply formatting
                 self.logger.info(f"Formatting {d_name}...")
                 d = d.map(_fmt_standardize, remove_columns=cols)
+                
+                # Filter out empty rows
+                d = d.filter(lambda x: len(x['text'].strip()) > 0)
+                
+                if len(d) == 0:
+                    self.logger.warning(f"Dataset {d_name} became empty after formatting/filtering! Skipping.")
+                    continue
+                
+                self.logger.info(f"Loaded and formatted {d_name}: {len(d)} samples")
                 loaded_datasets.append(d)
 
             except Exception as e:
                 self.logger.warning(f"Failed to load dataset {d_name}: {e}")
         
         if not loaded_datasets:
-            self.logger.warning("No datasets loaded successfully. Falling back to dummy wikitext.")
-            dataset = load_dataset('wikitext', 'wikitext-2-raw-v1', split='train')
-            if max_samples and len(dataset) > max_samples:
-                dataset = dataset.select(range(max_samples))
+            raise ValueError("All datasets failed to load or were empty! Cannot proceed.")
         elif len(loaded_datasets) == 1:
             dataset = loaded_datasets[0]
         else:
             from datasets import interleave_datasets
             self.logger.info(f"Interleaving {len(loaded_datasets)} datasets")
-            # Interleave with equal probability
-            dataset = interleave_datasets(loaded_datasets, seed=seed, stopping_strategy='first_exhausted')
+            # Interleave with equal probability, use all data
+            dataset = interleave_datasets(loaded_datasets, seed=seed, stopping_strategy='all_exhausted')
+        
+        if len(dataset) < 100:
+             raise ValueError(f"Combined dataset is too small ({len(dataset)} samples). Something is wrong with loading/formatting.")
         
         # Tokenize dataset
         def tokenize_function(examples):
@@ -1113,6 +1122,12 @@ def main():
     parser.add_argument('--max_steps', type=int, default=800, help='Optional hard cap on optimizer steps (overrides epochs if > 0)')
     parser.add_argument('--no_gradient_checkpointing', action='store_true', help='Disable gradient checkpointing (faster, higher memory)')
 
+    # Optional experiment tracking
+    parser.add_argument('--use_wandb', action='store_true', help='Enable Weights & Biases logging (Trainer integration)')
+    parser.add_argument('--wandb_project', type=str, default=None, help='W&B project name (optional)')
+    parser.add_argument('--wandb_entity', type=str, default=None, help='W&B entity/team (optional)')
+    parser.add_argument('--wandb_mode', type=str, default=None, help='W&B mode: offline|online|disabled (optional)')
+
     # Distillation
     parser.add_argument(
         '--teacher_model_path',
@@ -1158,6 +1173,13 @@ def main():
         'save_steps': 500,
         'save_total_limit': 3,
         'gradient_checkpointing': (not bool(args.no_gradient_checkpointing)),
+        # Optional logging integrations
+        'use_wandb': bool(args.use_wandb),
+        'wandb': {
+            'project': (str(args.wandb_project) if args.wandb_project else None),
+            'entity': (str(args.wandb_entity) if args.wandb_entity else None),
+            'mode': (str(args.wandb_mode) if args.wandb_mode else None),
+        },
         'galore': {
             'rank': args.rank,
             'learning_rate': args.learning_rate,

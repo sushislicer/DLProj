@@ -839,6 +839,22 @@ class BenchmarkRunner:
             elif model_size == "14B" and f"num_samples_14b" in benchmark_config:
                 adjusted_config['num_samples'] = benchmark_config['num_samples_14b']
                 self.logger.info(f"Using reduced sample count for 14B model: {adjusted_config['num_samples']}")
+
+            # Optional global overrides (CLI) for more comprehensive integration runs.
+            # Applied after debug/model-specific overrides.
+            try:
+                override_n = getattr(self, 'override_num_samples', None)
+                if override_n is not None:
+                    adjusted_config['num_samples'] = int(max(0, override_n))
+                else:
+                    mult = float(getattr(self, 'samples_multiplier', 1.0) or 1.0)
+                    if mult != 1.0 and 'num_samples' in adjusted_config and adjusted_config['num_samples'] is not None:
+                        base_n = int(adjusted_config['num_samples'])
+                        # Preserve explicit disables (0 samples).
+                        if base_n > 0:
+                            adjusted_config['num_samples'] = int(max(1, round(base_n * mult)))
+            except Exception:
+                pass
             
             # Apply 14B/72B-specific optimizations
             if model_size in ["14B", "72B"]:
@@ -1180,6 +1196,25 @@ def main():
     )
 
     parser.add_argument(
+        '--samples_multiplier',
+        type=float,
+        default=1.0,
+        help=(
+            'Multiply benchmark num_samples by this factor (applied after model-specific overrides). '
+            'Example: --samples_multiplier 2 doubles the evaluation sample counts.'
+        ),
+    )
+    parser.add_argument(
+        '--override_num_samples',
+        type=int,
+        default=None,
+        help=(
+            'If set, force all enabled benchmarks to use exactly this num_samples value '
+            '(applied after debug/model-specific overrides).'
+        ),
+    )
+
+    parser.add_argument(
         '--run_baselines',
         action='store_true',
         help='Also run baseline variants (native 4-bit quant, 4-bit QLoRA) as configured in the YAML'
@@ -1216,6 +1251,10 @@ def main():
     
     # Create benchmark runner
     runner = BenchmarkRunner(args.config, logger)
+
+    # Global sampling overrides (applied inside run_all_benchmarks_for_model).
+    runner.samples_multiplier = float(args.samples_multiplier or 1.0)
+    runner.override_num_samples = (int(args.override_num_samples) if args.override_num_samples is not None else None)
 
     # Baseline execution is opt-in.
     runner.run_baselines = bool(args.run_baselines)
