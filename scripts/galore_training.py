@@ -18,6 +18,7 @@ from utils.flash_attention import patch_broken_flash_attn
 patch_broken_flash_attn(logger=None)
 
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer
+from transformers import DataCollatorForLanguageModeling
 from peft import PeftModel
 try:
     # Some galore-torch variants expose GaLoreConfig and accept galore_config=...
@@ -258,8 +259,9 @@ class GaLoreTrainer:
         
         # Load dataset (example: using a subset of a common dataset)
         # You can replace this with your own dataset
-        dataset_name = self.config.get('dataset', 'c4')
+        dataset_name = self.config.get('dataset', 'wikitext')
         dataset_split = self.config.get('dataset_split', 'train')
+        dataset_config = self.config.get('dataset_config', None)
         max_samples = self.config.get('max_samples', 10000)
         seed = int(self.config.get('seed', 42))
 
@@ -291,7 +293,14 @@ class GaLoreTrainer:
                 else:
                     dataset = load_dataset('allenai/c4', 'en', split=dataset_split)
             else:
-                dataset = load_dataset(dataset_name, split=dataset_split)
+                # Default to a small dense dataset to avoid multi-hour downloads.
+                # Wikitext requires a dataset config.
+                if str(dataset_name).lower() == 'wikitext' and not dataset_config:
+                    dataset_config = 'wikitext-2-raw-v1'
+                if dataset_config:
+                    dataset = load_dataset(str(dataset_name), str(dataset_config), split=dataset_split)
+                else:
+                    dataset = load_dataset(str(dataset_name), split=dataset_split)
 
             if hasattr(dataset, '__len__') and max_samples and len(dataset) > max_samples:
                 dataset = dataset.select(range(max_samples))
@@ -346,46 +355,16 @@ class GaLoreTrainer:
                     cleaned.append(t)
             text = cleaned
 
+            # IMPORTANT: do *not* pad to max_length at dataset creation time.
+            # Padding here creates a large fraction of -100 labels (ignored tokens),
+            # and if text is empty it can lead to an all-ignored loss (=0.0).
+            # We instead pad dynamically in the Trainer via a data collator.
             tokens = self.tokenizer(
                 text,
                 truncation=True,
                 max_length=self.config.get('max_length', 512),
-                padding='max_length'
+                padding=False,
             )
-
-            # Causal LM labels: ignore padding tokens.
-            input_ids = tokens['input_ids']
-            attn = tokens.get('attention_mask', None)
-
-            # Normalize tokenizer output to list-of-lists.
-            # Some tokenizers return a single list[int] when given a single string.
-            if input_ids and isinstance(input_ids[0], int):
-                input_ids = [input_ids]
-            if attn is not None and attn and isinstance(attn[0], int):
-                attn = [attn]
-
-            # If attention masks are missing or degenerate, fall back to treating
-            # all positions as valid to avoid an all-ignored loss.
-            if attn is None:
-                attn = [[1] * len(ids) for ids in input_ids]
-            else:
-                # If a row has no unmasked tokens, mark everything valid.
-                fixed = []
-                for ids, m in zip(input_ids, attn):
-                    if sum(int(x) for x in m) == 0:
-                        fixed.append([1] * len(ids))
-                    else:
-                        fixed.append(m)
-                attn = fixed
-
-            labels = []
-            for ids, m in zip(input_ids, attn):
-                labels.append([tok if int(mask) == 1 else -100 for tok, mask in zip(ids, m)])
-            tokens['labels'] = labels
-
-            # Ensure we return the normalized structures.
-            tokens['input_ids'] = input_ids
-            tokens['attention_mask'] = attn
             return tokens
         
         # Tokenize dataset. If we ended up with a python list (streaming fallback),
@@ -834,6 +813,11 @@ class GaLoreTrainer:
             model=self.model,
             args=training_args,
             train_dataset=train_dataset,
+            data_collator=DataCollatorForLanguageModeling(
+                tokenizer=self.tokenizer,
+                mlm=False,
+                pad_to_multiple_of=8,
+            ),
             optimizers=(optimizer, None),
             teacher_model=self.teacher_model,
             distill_cfg=distill_cfg,
@@ -843,13 +827,13 @@ class GaLoreTrainer:
         # Train
         self.logger.info("Starting training loop...")
         self.memory_tracker.log_memory("GaLore", "Starting training loop...")
-        # Quick sanity log: ensure labels are not all ignored.
+        # Quick sanity log: show token length for the first sample.
+        # Labels are created by the data collator at batch time.
         try:
             sample = train_dataset[0]
-            lbl = sample.get('labels')
-            if isinstance(lbl, list):
-                num_valid = sum(1 for x in lbl if int(x) != -100)
-                self.logger.info(f"[Sanity] first sample valid labels: {num_valid}/{len(lbl)}")
+            ids = sample.get('input_ids')
+            if isinstance(ids, list):
+                self.logger.info(f"[Sanity] first sample token length: {len(ids)}")
         except Exception:
             pass
         trainer.train()

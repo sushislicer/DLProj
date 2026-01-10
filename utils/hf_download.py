@@ -17,11 +17,36 @@ from typing import Optional, Tuple
 
 _REPO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*(?:@[^\s]+)?$")
 
+# In this repo we frequently pass *workspace-relative* paths like
+# "outputs/..." or "datasets/...". Those look like HF repo IDs ("org/repo")
+# but should be treated as local paths.
+_LOCAL_PREFIXES = (
+    "outputs/",
+    "output/",
+    "cache/",
+    "datasets/",
+    "configs/",
+    "scripts/",
+    "utils/",
+    "tex/",
+    "logs/",
+    "benchmark_results/",
+    "offload/",
+)
+
 
 def is_probably_hf_repo_id(value: str) -> bool:
     v = str(value).strip()
     if not v:
         return False
+
+    # Treat common workspace-relative prefixes as local paths even if they don't
+    # exist yet (e.g., will be created by a previous pipeline stage).
+    v_norm = v.replace("\\", "/")
+    for p in _LOCAL_PREFIXES:
+        if v_norm.startswith(p):
+            return False
+
     # Clearly local-ish patterns.
     if v.startswith(("/", "./", "../")):
         return False
@@ -83,4 +108,3 @@ def resolve_path_or_hf_repo(
     )
     logger.info(f"Downloaded {repo_id} to: {local_dir}")
     return str(local_dir)
-

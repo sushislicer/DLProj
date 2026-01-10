@@ -57,28 +57,31 @@ def main() -> None:
             t = tok.eos_token or tok.pad_token or "Hello"
         texts.append(str(t))
 
-    batch = tok(texts, truncation=True, max_length=args.max_length, padding="max_length")
+    # Use dynamic padding (longest in batch) to mirror Trainer collators.
+    batch = tok(texts, truncation=True, max_length=args.max_length, padding=True)
     input_ids = batch["input_ids"]
     attn = batch.get("attention_mask")
     if attn is None:
         attn = [[1] * len(ids) for ids in input_ids]
 
     labels = []
+    per_valid = []
     for ids, m in zip(input_ids, attn):
         if sum(int(x) for x in m) == 0:
             m = [1] * len(ids)
-        labels.append([tok_id if int(mask) == 1 else -100 for tok_id, mask in zip(ids, m)])
+        lab = [tok_id if int(mask) == 1 else -100 for tok_id, mask in zip(ids, m)]
+        labels.append(lab)
+        per_valid.append(sum(1 for x in lab if int(x) != -100))
 
     # Summaries
-    total = 0
-    valid = 0
-    for lab in labels:
-        total += len(lab)
-        valid += sum(1 for x in lab if int(x) != -100)
+    total = sum(len(lab) for lab in labels)
+    valid = sum(sum(1 for x in lab if int(x) != -100) for lab in labels)
+    num_zero = sum(1 for v in per_valid if int(v) == 0)
 
     print(f"Loaded {len(texts)} samples from dataset={args.dataset} split={args.split} (streaming={bool(args.streaming)})")
-    print(f"Tokenized to max_length={args.max_length}")
+    print(f"Tokenized with dynamic padding (batch-longest), max_length={args.max_length}")
     print(f"Valid labels (not -100): {valid}/{total} = {100.0 * valid / max(1, total):.2f}%")
+    print(f"Samples with 0 valid labels: {num_zero}/{len(texts)}")
 
     # Show a small example
     ex_i = 0
@@ -92,4 +95,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
