@@ -303,6 +303,11 @@ class GaLoreTrainer:
                 # Wikitext requires a dataset config.
                 if str(dataset_name).lower() == 'wikitext' and not dataset_config:
                     dataset_config = 'wikitext-2-raw-v1'
+                # Force wikitext-2-raw-v1 if wikitext is requested, as v1 can be problematic
+                if str(dataset_name).lower() == 'wikitext':
+                    self.logger.info("Forcing wikitext-2-raw-v1 for reliability")
+                    dataset_config = 'wikitext-2-raw-v1'
+
                 if dataset_config:
                     try:
                         dataset = load_dataset(str(dataset_name), str(dataset_config), split=dataset_split)
@@ -357,10 +362,8 @@ class GaLoreTrainer:
                 self.logger.info(f"[Tokenize] First sample raw: {repr(text[0])[:200]}")
 
             # Ensure we never produce all-padding sequences.
-            # Instead of filling with EOS (which gets masked), we SKIP empty lines.
-            # If the entire batch is empty, we insert one filler to keep the pipeline moving,
-            # but warn about it.
-            filler = (self.tokenizer.eos_token or self.tokenizer.pad_token or "Hello")
+            # Use a long filler sentence to ensure non-zero loss if fallback occurs.
+            filler = "The quick brown fox jumps over the lazy dog."
             cleaned = []
             for t in text:
                 if isinstance(t, str) and t.strip():
@@ -369,7 +372,8 @@ class GaLoreTrainer:
             if not cleaned:
                 if not hasattr(self, '_warned_empty_batch'):
                     self._warned_empty_batch = True
-                    self.logger.warning(f"[Tokenize] Batch consists ENTIRELY of empty text! Using filler fallback.")
+                    self.logger.warning(f"[Tokenize] Batch consists ENTIRELY of empty text! Using filler fallback: '{filler}'")
+                    self.logger.warning(f"[Tokenize] Input keys were: {list(examples.keys()) if isinstance(examples, dict) else 'not dict'}")
                 cleaned = [filler]
             
             text = cleaned
