@@ -331,6 +331,21 @@ class GaLoreTrainer:
             if isinstance(text, str):
                 text = [text]
 
+            # Ensure we never produce all-padding sequences (which can yield loss=0
+            # when all labels become -100). Replace empty/None texts with a small
+            # non-empty string.
+            filler = (self.tokenizer.eos_token or self.tokenizer.pad_token or "Hello")
+            cleaned = []
+            for t in text:
+                if not isinstance(t, str):
+                    cleaned.append(filler)
+                    continue
+                if not t.strip():
+                    cleaned.append(filler)
+                else:
+                    cleaned.append(t)
+            text = cleaned
+
             tokens = self.tokenizer(
                 text,
                 truncation=True,
@@ -349,18 +364,28 @@ class GaLoreTrainer:
             if attn is not None and attn and isinstance(attn[0], int):
                 attn = [attn]
 
+            # If attention masks are missing or degenerate, fall back to treating
+            # all positions as valid to avoid an all-ignored loss.
             if attn is None:
-                tokens['labels'] = input_ids
+                attn = [[1] * len(ids) for ids in input_ids]
             else:
-                labels = []
+                # If a row has no unmasked tokens, mark everything valid.
+                fixed = []
                 for ids, m in zip(input_ids, attn):
-                    labels.append([tok if mask == 1 else -100 for tok, mask in zip(ids, m)])
-                tokens['labels'] = labels
+                    if sum(int(x) for x in m) == 0:
+                        fixed.append([1] * len(ids))
+                    else:
+                        fixed.append(m)
+                attn = fixed
+
+            labels = []
+            for ids, m in zip(input_ids, attn):
+                labels.append([tok if int(mask) == 1 else -100 for tok, mask in zip(ids, m)])
+            tokens['labels'] = labels
 
             # Ensure we return the normalized structures.
             tokens['input_ids'] = input_ids
-            if attn is not None:
-                tokens['attention_mask'] = attn
+            tokens['attention_mask'] = attn
             return tokens
         
         # Tokenize dataset. If we ended up with a python list (streaming fallback),
@@ -818,6 +843,15 @@ class GaLoreTrainer:
         # Train
         self.logger.info("Starting training loop...")
         self.memory_tracker.log_memory("GaLore", "Starting training loop...")
+        # Quick sanity log: ensure labels are not all ignored.
+        try:
+            sample = train_dataset[0]
+            lbl = sample.get('labels')
+            if isinstance(lbl, list):
+                num_valid = sum(1 for x in lbl if int(x) != -100)
+                self.logger.info(f"[Sanity] first sample valid labels: {num_valid}/{len(lbl)}")
+        except Exception:
+            pass
         trainer.train()
         
         elapsed_time = time.time() - start_time

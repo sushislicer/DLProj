@@ -72,7 +72,8 @@ benchmarks:
   aime:
     enabled: true
     dataset_path: "datasets/aime"
-    num_samples: 100
+    # For small models (0.5B/7B), we can afford more samples for tighter CIs.
+    num_samples: 200
     num_samples_14b: 50
     num_samples_72b: 15
     max_length: 2048
@@ -90,7 +91,8 @@ benchmarks:
   math:
     enabled: true
     dataset_path: "datasets/math"
-    num_samples: 300
+    # For small models (0.5B/7B), we can afford more samples for tighter CIs.
+    num_samples: 500
     num_samples_14b: 120
     num_samples_72b: 30
     max_length: 2048
@@ -108,7 +110,8 @@ benchmarks:
   livecodebench:
     enabled: true
     dataset_path: "datasets/livecodebench"
-    num_samples: 60
+    # For small models (0.5B/7B), we can afford more samples.
+    num_samples: 100
     num_samples_14b: 20
     num_samples_72b: 0
     max_length: 4096
@@ -131,7 +134,8 @@ benchmarks:
   gpqa:
     enabled: true
     dataset_path: "datasets/gpqa"
-    num_samples: 300
+    # For small models (0.5B/7B), we can afford more samples for tighter CIs.
+    num_samples: 500
     num_samples_14b: 150
     num_samples_72b: 40
     max_length: 2048
