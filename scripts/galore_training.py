@@ -311,13 +311,39 @@ class GaLoreTrainer:
                 
                 # Cap size per dataset
                 if hasattr(d, '__len__') and max_samples and len(d) > max_samples:
-                    # If mixing multiple datasets, maybe we want max_samples TOTAL?
-                    # For now, let's cap each to ensure balance if they are large.
-                    # Or divide max_samples by num_datasets?
-                    # Let's keep it simple: cap each.
                     d = d.select(range(max_samples))
                 
+                self.logger.info(f"Loaded {d_name}: {len(d)} samples")
+                
+                # Standardize to 'text' column immediately to avoid schema issues during interleave
+                # or map batching issues.
+                cols = d.column_names
+                
+                def _fmt_standardize(ex):
+                    # Check for standard formats
+                    if 'text' in ex and ex['text'] is not None:
+                        return {'text': ex['text']}
+                    if 'instruction' in ex and 'output' in ex:
+                        # Alpaca / Evol-Code
+                        inst = ex['instruction']
+                        inp = ex.get('input', '')
+                        out = ex['output']
+                        if inp:
+                            t = f"Instruction: {inst}\nInput: {inp}\nResponse: {out}"
+                        else:
+                            t = f"Instruction: {inst}\nResponse: {out}"
+                        return {'text': t}
+                    if 'query' in ex and 'response' in ex:
+                        # MetaMath
+                        return {'text': f"Question: {ex['query']}\nAnswer: {ex['response']}"}
+                    # Fallback
+                    return {'text': ''}
+
+                # Apply formatting
+                self.logger.info(f"Formatting {d_name}...")
+                d = d.map(_fmt_standardize, remove_columns=cols)
                 loaded_datasets.append(d)
+
             except Exception as e:
                 self.logger.warning(f"Failed to load dataset {d_name}: {e}")
         
@@ -341,28 +367,8 @@ class GaLoreTrainer:
             if isinstance(examples, dict):
                 if 'text' in examples:
                     text = examples['text']
-                elif 'instruction' in examples and 'output' in examples:
-                    # Alpaca / Evol-Code format
-                    text = []
-                    for i in range(len(examples['instruction'])):
-                        inst = examples['instruction'][i]
-                        inp = examples['input'][i] if 'input' in examples else ''
-                        out = examples['output'][i]
-                        if inp:
-                            t = f"Instruction: {inst}\nInput: {inp}\nResponse: {out}"
-                        else:
-                            t = f"Instruction: {inst}\nResponse: {out}"
-                        text.append(t)
-                elif 'query' in examples and 'response' in examples:
-                    # MetaMathQA format
-                    text = []
-                    for i in range(len(examples['query'])):
-                        q = examples['query'][i]
-                        r = examples['response'][i]
-                        t = f"Question: {q}\nAnswer: {r}"
-                        text.append(t)
                 else:
-                    # Common alternatives
+                    # Common alternatives (should be handled by _fmt_standardize, but just in case)
                     for k in ('content', 'prompt', 'question'):
                         if k in examples:
                             text = examples[k]
