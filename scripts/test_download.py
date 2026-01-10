@@ -60,6 +60,8 @@ def main() -> None:
 
     if args.hf_endpoint:
         os.environ.setdefault('HF_ENDPOINT', str(args.hf_endpoint))
+        # Also set HF_HUB_ENDPOINT which some older libraries/versions might use
+        os.environ.setdefault('HF_HUB_ENDPOINT', str(args.hf_endpoint))
 
     if args.hf_token:
         os.environ.setdefault('HF_TOKEN', str(args.hf_token))
