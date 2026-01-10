@@ -288,9 +288,13 @@ def download_gpqa_dataset(output_path: str = 'datasets/gpqa'):
     """
     try:
         from datasets import load_dataset
-        
-        # Load GPQA dataset from Hugging Face
-        dataset = load_dataset("Idavidrein/gpqa", split="test")
+
+        dataset_id = os.environ.get('BENCH_GPQA_HF_DATASET', '').strip() or 'Idavidrein/gpqa'
+        split = os.environ.get('BENCH_GPQA_HF_SPLIT', 'test')
+
+        # GPQA is often gated; user may need to pass a token.
+        # Allow overriding the dataset id via env var.
+        dataset = load_dataset(dataset_id, split=split)
         
         # Convert to list of dictionaries
         data = []
@@ -310,9 +314,15 @@ def download_gpqa_dataset(output_path: str = 'datasets/gpqa'):
         with open(os.path.join(output_path, 'gpqa.json'), 'w') as f:
             json.dump(data, f, indent=2)
         
-        print(f"GPQA dataset downloaded and saved to {output_path}")
+        print(f"GPQA dataset downloaded ({dataset_id}:{split}) and saved to {output_path}")
         return data
     
     except Exception as e:
-        print(f"Error downloading GPQA dataset: {e}")
+        print(
+            "Error downloading GPQA dataset: "
+            f"{e}\n"
+            "GPQA may be a gated dataset. If so, pass a token: "
+            "`python3 scripts/test_download.py --datasets gpqa --hf_token <TOKEN>` "
+            "or set env var BENCH_GPQA_HF_DATASET to an accessible mirror dataset id."
+        )
         return []

@@ -403,6 +403,18 @@ python3 scripts/test_download.py --datasets aime math gpqa livecodebench --outpu
 python3 scripts/test_download.py --hf_token "$HF_TOKEN"
 ```
 
+### Notes on dataset availability
+
+- Some dataset repo ids can change over time.
+- Some datasets (notably **GPQA**) may be **gated**, requiring a HuggingFace token.
+- The download helpers support overriding dataset ids via environment variables:
+  - `BENCH_MATH_HF_DATASET` (default: `hendrycks/competition_math`)
+  - `BENCH_AIME_HF_DATASET`
+  - `BENCH_GPQA_HF_DATASET`
+  - `BENCH_LIVECODEBENCH_HF_DATASET`
+
+If a download returns 0 samples, rerun with `--hf_token` (for gated datasets) or set the appropriate `BENCH_*_HF_DATASET` variable to a valid mirror.
+
 ### Import Errors
 
 **Problem**: Module not found errors

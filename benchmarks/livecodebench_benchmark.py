@@ -402,9 +402,35 @@ def download_livecodebench_dataset(output_path: str = 'datasets/livecodebench'):
     """
     try:
         from datasets import load_dataset
-        
-        # Load LiveCodeBench dataset from Hugging Face
-        dataset = load_dataset("livecodebench/livecodebench", split="test")
+
+        dataset_id = os.environ.get('BENCH_LIVECODEBENCH_HF_DATASET', '').strip()
+        split = os.environ.get('BENCH_LIVECODEBENCH_HF_SPLIT', 'test')
+
+        candidates = [
+            dataset_id,
+            # Commonly-referenced ids (availability may vary).
+            'livecodebench/livecodebench',
+            'livecodebench/LiveCodeBench',
+        ]
+        candidates = [c for c in candidates if c]
+
+        dataset = None
+        last_err: Exception | None = None
+        for cand in candidates:
+            try:
+                dataset = load_dataset(cand, split=split)
+                dataset_id = cand
+                break
+            except Exception as e:
+                last_err = e
+                continue
+
+        if dataset is None:
+            raise RuntimeError(
+                "Could not download LiveCodeBench from HuggingFace. "
+                "Set BENCH_LIVECODEBENCH_HF_DATASET to a valid dataset repo id, or provide a local JSON under datasets/livecodebench. "
+                f"Last error: {last_err}"
+            )
         
         # Convert to list of dictionaries
         data = []
@@ -423,7 +449,7 @@ def download_livecodebench_dataset(output_path: str = 'datasets/livecodebench'):
         with open(os.path.join(output_path, 'livecodebench.json'), 'w') as f:
             json.dump(data, f, indent=2)
         
-        print(f"LiveCodeBench dataset downloaded and saved to {output_path}")
+        print(f"LiveCodeBench dataset downloaded ({dataset_id}:{split}) and saved to {output_path}")
         return data
     
     except Exception as e:

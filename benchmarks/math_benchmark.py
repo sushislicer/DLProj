@@ -310,21 +310,41 @@ def download_math_dataset(output_path: str = 'datasets/math'):
         output_path: Path to save dataset
     """
     try:
+        import re
         from datasets import load_dataset
-        
-        # Load MATH dataset from Hugging Face
-        dataset = load_dataset("EleutherAI/math", split="test")
-        
+
+        # NOTE:
+        # The previous repo id ("EleutherAI/math") no longer exists on HF.
+        # Use the widely-available MATH competition dataset.
+        dataset_id = os.environ.get('BENCH_MATH_HF_DATASET', 'hendrycks/competition_math')
+        split = os.environ.get('BENCH_MATH_HF_SPLIT', 'test')
+
+        dataset = load_dataset(dataset_id, split=split)
+
+        def _extract_answer_from_solution(sol: str) -> str:
+            s = str(sol or '')
+            # Common MATH format: \boxed{...}
+            boxed = re.findall(r"\\boxed\{([^}]*)\}", s)
+            if boxed:
+                return str(boxed[-1]).strip()
+            # Fallback: last non-empty line
+            lines = [ln.strip() for ln in s.splitlines() if ln.strip()]
+            if lines:
+                return lines[-1]
+            return ''
+
         # Convert to list of dictionaries
         data = []
         for item in dataset:
+            problem = item.get('problem') or item.get('question') or ''
+            solution = item.get('solution') or item.get('answer') or ''
             data.append({
                 'id': item.get('id', len(data)),
-                'problem': item['problem'],
-                'answer': item['answer'],
-                'subject': item.get('subject', 'Unknown'),
+                'problem': problem,
+                'answer': _extract_answer_from_solution(solution),
+                'subject': item.get('type', item.get('subject', 'Unknown')),
                 'level': item.get('level', 'Unknown'),
-                'solution': item.get('solution', '')
+                'solution': solution,
             })
         
         # Save to file
@@ -332,7 +352,7 @@ def download_math_dataset(output_path: str = 'datasets/math'):
         with open(os.path.join(output_path, 'math.json'), 'w') as f:
             json.dump(data, f, indent=2)
         
-        print(f"MATH dataset downloaded and saved to {output_path}")
+        print(f"MATH dataset downloaded ({dataset_id}:{split}) and saved to {output_path}")
         return data
     
     except Exception as e:

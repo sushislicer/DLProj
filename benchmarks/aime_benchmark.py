@@ -216,9 +216,39 @@ def download_aime_dataset(output_path: str = 'datasets/aime'):
     """
     try:
         from datasets import load_dataset
-        
-        # Load AIME dataset from Hugging Face
-        dataset = load_dataset("EleutherAI/aime", split="test")
+
+        # NOTE:
+        # The previous repo id ("EleutherAI/aime") may not exist anymore.
+        # Try a configurable dataset id first, then fall back to a small list
+        # of known/commonly-used community mirrors.
+        dataset_id = os.environ.get('BENCH_AIME_HF_DATASET', '').strip()
+        split = os.environ.get('BENCH_AIME_HF_SPLIT', 'test')
+
+        candidates = [
+            dataset_id,
+            # Community mirrors (availability can change).
+            'Maxwell-Jia/AIME_2024',
+            'lighteval/aime',
+        ]
+        candidates = [c for c in candidates if c]
+
+        dataset = None
+        last_err: Exception | None = None
+        for cand in candidates:
+            try:
+                dataset = load_dataset(cand, split=split)
+                dataset_id = cand
+                break
+            except Exception as e:
+                last_err = e
+                continue
+
+        if dataset is None:
+            raise RuntimeError(
+                "Could not download an AIME dataset from HuggingFace. "
+                "Set BENCH_AIME_HF_DATASET to a valid dataset repo id, or provide a local JSON under datasets/aime. "
+                f"Last error: {last_err}"
+            )
         
         # Convert to list of dictionaries
         data = []
@@ -236,7 +266,7 @@ def download_aime_dataset(output_path: str = 'datasets/aime'):
         with open(os.path.join(output_path, 'aime.json'), 'w') as f:
             json.dump(data, f, indent=2)
         
-        print(f"AIME dataset downloaded and saved to {output_path}")
+        print(f"AIME dataset downloaded ({dataset_id}:{split}) and saved to {output_path}")
         return data
     
     except Exception as e:
