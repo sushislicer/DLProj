@@ -183,10 +183,10 @@ logging:
     enabled: true
     log_dir: "logs/tensorboard"
   wandb:
-    enabled: true
-    mode: "online"
-    project: "DLProj"
-    entity: "yangchen0305"
+    enabled: false
+    mode: "offline"
+    project: null
+    entity: null
     run_name: null
     tags: ["4x5090"]
 

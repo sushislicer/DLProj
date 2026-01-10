@@ -10,11 +10,11 @@ log_dir: "logs"
 
 # Optional experiment trackers (GaLore training)
 use_tensorboard: true
-use_wandb: true
+use_wandb: false
 wandb:
-  mode: "online"  # offline|online|disabled
-  project: "DLProj"
-  entity: "yangchen0305"
+  mode: "offline"  # offline|online|disabled
+  project: null
+  entity: null
 
 # Training Configuration (bounded defaults)
 seed: 42

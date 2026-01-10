@@ -253,12 +253,12 @@ logging:
     enabled: true
     log_dir: "logs/tensorboard"
   wandb:
-    enabled: true
+    enabled: false
     # Default to offline so runs don't require an API key by default.
     # Set WANDB_MODE=online or set mode: "online" + configure auth if desired.
-    mode: "online"  # offline|online|disabled
-    project: "DLProj"
-    entity: "yangchen0305"
+    mode: "offline"  # offline|online|disabled
+    project: null
+    entity: null
     run_name: null
     tags: []
 

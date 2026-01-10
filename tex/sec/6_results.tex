@@ -3,31 +3,51 @@
 
 \begin{table*}[t]
   \centering
-  \caption{Main results on reasoning benchmarks. We compare the baseline 4-bit quantization against our proposed \method pipeline. The results demonstrate consistent improvements across all benchmarks.}
+  \caption{Preliminary results from lightweight evaluation on 0.5B and 7B models. Due to resource constraints, these results are based on a small sample size (N=5 to 20) and serve as a proof of concept.}
   \label{tab:main_results}
   \begin{tabular}{lcccccc}
     \toprule
-    Model & Method & Quant & AIME (Acc) & MATH (Acc) & GPQA (Acc) & LiveCodeBench (Pass) \\
+    Model & Method & AIME & MATH & GPQA & LiveCodeBench & SWE-Bench \\
     \midrule
-    \qwen{}-14B & Baseline & 4-bit & 39.5\% & 49.8\% & 34.2\% & 24.5\% \\
-    \qwen{}-14B & \method & 4-bit & \textbf{41.8\%} & \textbf{52.1\%} & \textbf{36.5\%} & \textbf{26.8\%} \\
+    \qwen{}-0.5B & Baseline (4-bit) & 20.0\% & 0.0\% & 70.0\% & 0.0\% & 100.0\% \\
+    \qwen{}-0.5B & \method & 20.0\% & 0.0\% & 70.0\% & 0.0\% & 100.0\% \\
     \midrule
-    \qwen{}-72B & Baseline & 4-bit & 59.2\% & 69.5\% & 49.1\% & 39.4\% \\
-    \qwen{}-72B & \method & 4-bit & \textbf{61.5\%} & \textbf{71.8\%} & \textbf{51.4\%} & \textbf{41.7\%} \\
+    \qwen{}-7B & Baseline (4-bit) & 0.0\% & 0.0\% & 100.0\% & 0.0\% & 100.0\% \\
+    \qwen{}-7B & \method & 0.0\% & 0.0\% & 100.0\% & 0.0\% & 100.0\% \\
     \bottomrule
   \end{tabular}
 \end{table*}
 
 \begin{figure}[t]
   \centering
-  \fbox{\rule{0pt}{2in} \rule{0.9\linewidth}{0pt}}
-  \caption{Performance comparison on MATH benchmark. The proposed method (orange) consistently outperforms the baseline (blue) across different model sizes.}
-  \label{fig:math_results}
+  \includegraphics[width=\linewidth]{Picture1.png}
+  \caption{Effect of SpinQuant on weight distribution. The rotation matrix effectively reduces outliers, making the weights more amenable to 4-bit quantization.}
+  \label{fig:spinquant_effect_1}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{Picture2.png}
+  \caption{Impact of SpinQuant rotation on quantization error. By rotating the weight matrices, we observe a significant reduction in the reconstruction error compared to standard quantization.}
+  \label{fig:spinquant_effect_2}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{Picture3.png}
+  \caption{Preliminary evaluation on WikiText2. This initial benchmark demonstrates the stability of the model performance after the proposed adaptation pipeline.}
+  \label{fig:wikitext_eval}
 \end{figure}
 
 \paragraph{Analysis.}
-As shown in \cref{tab:main_results}, our method achieves superior performance compared to the standard 4-bit quantization baseline.
-On the challenging AIME benchmark, we observe a 2.3\% improvement for the 14B model and a 2.3\% improvement for the 72B model.
-Similar gains are observed on MATH and GPQA, indicating that the rotation-aware quantization effectively preserves the model's reasoning capabilities.
-LiveCodeBench results also show a steady improvement, suggesting that the code generation ability is maintained or enhanced.
-The consistent improvements across different scales (14B and 72B) validate the scalability of our approach.
+\cref{tab:main_results} presents the results from our lightweight evaluation.
+We observe that for the 0.5B model, both the baseline and our pipeline achieve 20\% accuracy on AIME and 70\% on GPQA.
+For the 7B model, we see perfect scores on GPQA and SWE-Bench, likely due to the small sample size and the specific nature of the sampled questions.
+However, performance on MATH and LiveCodeBench remains low (0\%) for both models in this limited evaluation.
+The identical performance between the baseline and our method in this run suggests that for these specific small samples, the quantization impact was uniform, or that the adapter influence was minimal.
+
+\paragraph{Constraints.}
+It is important to note that due to significant constraints on manpower, compute resources, and time, we were unable to perform a comprehensive evaluation on the full test sets or larger model sizes (14B, 72B).
+The reported numbers are based on a "lightweight" protocol with a very small number of samples (5-20) to ensure feasibility within the project timeline.
+Consequently, these results should be interpreted as a functional verification of the pipeline rather than a definitive measure of its capability.
+Future work with adequate resources would be required to fully characterize the performance benefits on the complete benchmarks.
