@@ -54,8 +54,13 @@ class LiveCodeBenchBenchmark(CodeExecutionBenchmark):
                         data.extend(json.load(f))
                 return data
         
-        # If no dataset found, create sample data
-        self.logger.warning(f"LiveCodeBench dataset not found at {dataset_path}, using sample data")
+        # If no dataset found, try to download
+        self.logger.info(f"LiveCodeBench dataset not found at {dataset_path}, attempting download...")
+        data = download_livecodebench_dataset(dataset_path)
+        if data:
+            return data
+
+        self.logger.warning(f"Download failed, using sample data")
         return self._create_sample_dataset()
     
     def _create_sample_dataset(self) -> List[Dict]:
