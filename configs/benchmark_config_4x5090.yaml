@@ -65,8 +65,8 @@ gpu:
     bits: 4
     quant_type: "nf4"
     double_quant: true
-    compute_dtype: "float16"
-    use_flash_attention: true
+    compute_dtype: "float32"
+    use_flash_attention: false
 
 benchmarks:
   aime:
@@ -183,7 +183,7 @@ logging:
     tags: ["4x5090"]
 
 advanced:
-  use_flash_attention: true
+  use_flash_attention: false
   use_cache: true
   gradient_checkpointing: false
   low_cpu_mem_usage: true

@@ -32,8 +32,9 @@ max_steps: 800
 # Dataset Configuration
 # NOTE: This dataset is used for *adapter training* in the pipeline.
 # Use a dense dataset by default (fewer empty lines / short samples than C4 snippets).
-dataset: "wikitext"
-dataset_config: "wikitext-2-v1"
+# Mixed high-quality datasets: Alpaca (General), MetaMathQA (Math), Evol-Code (Code)
+dataset: "tatsu-lab/alpaca,meta-math/MetaMathQA,nickrosh/Evol-Instruct-Code-80k-v1"
+dataset_config: null
 dataset_split: "train"
 dataset_streaming: false
 # Filter out very short samples (used only if grouping into blocks fails and we

@@ -265,67 +265,74 @@ class GaLoreTrainer:
         
         # Load dataset (example: using a subset of a common dataset)
         # You can replace this with your own dataset
-        dataset_name = self.config.get('dataset', 'wikitext')
+        dataset_name_str = self.config.get('dataset', 'wikitext')
         dataset_split = self.config.get('dataset_split', 'train')
         dataset_config = self.config.get('dataset_config', None)
         max_samples = self.config.get('max_samples', 10000)
         seed = int(self.config.get('seed', 42))
 
-        # Avoid multi-hour downloads on fresh machines.
-        # If using C4, default to streaming and materialize only the first N samples.
-        use_streaming = bool(self.config.get('dataset_streaming', True))
+        # Support comma-separated list of datasets
+        dataset_names = [d.strip() for d in str(dataset_name_str).split(',')]
+        loaded_datasets = []
+
+        for d_name in dataset_names:
+            self.logger.info(f"Loading dataset: {d_name}")
+            try:
+                # Special handling for C4
+                if d_name.lower() == 'c4':
+                    use_streaming = bool(self.config.get('dataset_streaming', True))
+                    if use_streaming:
+                        self.logger.info(f"Loading C4 via streaming and materializing max_samples={max_samples}")
+                        ds_stream = load_dataset('allenai/c4', 'en', split=dataset_split, streaming=True)
+                        buf = int(self.config.get('dataset_shuffle_buffer', min(10_000, max(1, int(max_samples) * 5))))
+                        try:
+                            ds_stream = ds_stream.shuffle(seed=seed, buffer_size=buf)
+                        except Exception:
+                            pass
+                        rows = list(itertools.islice(ds_stream, int(max_samples)))
+                        try:
+                            from datasets import Dataset
+                            d = Dataset.from_list(rows)
+                        except Exception:
+                            d = rows
+                    else:
+                        d = load_dataset('allenai/c4', 'en', split=dataset_split)
+                else:
+                    # Default loading
+                    # Handle wikitext config override if it's the only dataset or explicitly requested
+                    d_config = dataset_config
+                    if d_name.lower() == 'wikitext':
+                        d_config = 'wikitext-2-raw-v1'
+                    
+                    if d_config:
+                        d = load_dataset(d_name, str(d_config), split=dataset_split)
+                    else:
+                        d = load_dataset(d_name, split=dataset_split)
+                
+                # Cap size per dataset
+                if hasattr(d, '__len__') and max_samples and len(d) > max_samples:
+                    # If mixing multiple datasets, maybe we want max_samples TOTAL?
+                    # For now, let's cap each to ensure balance if they are large.
+                    # Or divide max_samples by num_datasets?
+                    # Let's keep it simple: cap each.
+                    d = d.select(range(max_samples))
+                
+                loaded_datasets.append(d)
+            except Exception as e:
+                self.logger.warning(f"Failed to load dataset {d_name}: {e}")
         
-        try:
-            # `datasets` has changed over time; prefer canonical dataset IDs.
-            # If using C4, use streaming by default to avoid downloading the full corpus.
-            if str(dataset_name).lower() == 'c4':
-                if use_streaming:
-                    self.logger.info(f"Loading C4 via streaming and materializing max_samples={max_samples}")
-                    ds_stream = load_dataset('allenai/c4', 'en', split=dataset_split, streaming=True)
-                    # Shuffle within a small buffer for variety while staying fast.
-                    buf = int(self.config.get('dataset_shuffle_buffer', min(10_000, max(1, int(max_samples) * 5))))
-                    try:
-                        ds_stream = ds_stream.shuffle(seed=seed, buffer_size=buf)
-                    except Exception:
-                        pass
-                    rows = list(itertools.islice(ds_stream, int(max_samples)))
-                    try:
-                        from datasets import Dataset
-
-                        dataset = Dataset.from_list(rows)
-                    except Exception:
-                        # Fallback: keep as a python list-like dataset
-                        dataset = rows
-                else:
-                    dataset = load_dataset('allenai/c4', 'en', split=dataset_split)
-            else:
-                # Default to a small dense dataset to avoid multi-hour downloads.
-                # Wikitext requires a dataset config.
-                if str(dataset_name).lower() == 'wikitext' and not dataset_config:
-                    dataset_config = 'wikitext-2-raw-v1'
-                # Force wikitext-2-raw-v1 if wikitext is requested, as v1 can be problematic
-                if str(dataset_name).lower() == 'wikitext':
-                    self.logger.info("Forcing wikitext-2-raw-v1 for reliability")
-                    dataset_config = 'wikitext-2-raw-v1'
-
-                if dataset_config:
-                    try:
-                        dataset = load_dataset(str(dataset_name), str(dataset_config), split=dataset_split)
-                    except Exception as e:
-                        self.logger.warning(f"Failed to load {dataset_name} {dataset_config} ({e}), trying wikitext-2-raw-v1")
-                        dataset = load_dataset(str(dataset_name), 'wikitext-2-raw-v1', split=dataset_split)
-                else:
-                    dataset = load_dataset(str(dataset_name), split=dataset_split)
-
-            if hasattr(dataset, '__len__') and max_samples and len(dataset) > max_samples:
-                dataset = dataset.select(range(max_samples))
-        except Exception as e:
-            self.logger.warning(f"Could not load dataset {dataset_name}: {e}")
-            self.logger.info("Using dummy dataset for demonstration")
-            # Create dummy dataset
+        if not loaded_datasets:
+            self.logger.warning("No datasets loaded successfully. Falling back to dummy wikitext.")
             dataset = load_dataset('wikitext', 'wikitext-2-raw-v1', split='train')
             if max_samples and len(dataset) > max_samples:
                 dataset = dataset.select(range(max_samples))
+        elif len(loaded_datasets) == 1:
+            dataset = loaded_datasets[0]
+        else:
+            from datasets import interleave_datasets
+            self.logger.info(f"Interleaving {len(loaded_datasets)} datasets")
+            # Interleave with equal probability
+            dataset = interleave_datasets(loaded_datasets, seed=seed, stopping_strategy='first_exhausted')
         
         # Tokenize dataset
         def tokenize_function(examples):
@@ -334,6 +341,26 @@ class GaLoreTrainer:
             if isinstance(examples, dict):
                 if 'text' in examples:
                     text = examples['text']
+                elif 'instruction' in examples and 'output' in examples:
+                    # Alpaca / Evol-Code format
+                    text = []
+                    for i in range(len(examples['instruction'])):
+                        inst = examples['instruction'][i]
+                        inp = examples['input'][i] if 'input' in examples else ''
+                        out = examples['output'][i]
+                        if inp:
+                            t = f"Instruction: {inst}\nInput: {inp}\nResponse: {out}"
+                        else:
+                            t = f"Instruction: {inst}\nResponse: {out}"
+                        text.append(t)
+                elif 'query' in examples and 'response' in examples:
+                    # MetaMathQA format
+                    text = []
+                    for i in range(len(examples['query'])):
+                        q = examples['query'][i]
+                        r = examples['response'][i]
+                        t = f"Question: {q}\nAnswer: {r}"
+                        text.append(t)
                 else:
                     # Common alternatives
                     for k in ('content', 'prompt', 'question'):
