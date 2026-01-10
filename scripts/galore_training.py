@@ -11,6 +11,12 @@ import torch
 import argparse
 import sys
 
+# Suppress stream mismatch warning (common in some environments)
+try:
+    torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(False)
+except Exception:
+    pass
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.flash_attention import patch_broken_flash_attn
 
@@ -298,7 +304,11 @@ class GaLoreTrainer:
                 if str(dataset_name).lower() == 'wikitext' and not dataset_config:
                     dataset_config = 'wikitext-2-raw-v1'
                 if dataset_config:
-                    dataset = load_dataset(str(dataset_name), str(dataset_config), split=dataset_split)
+                    try:
+                        dataset = load_dataset(str(dataset_name), str(dataset_config), split=dataset_split)
+                    except Exception as e:
+                        self.logger.warning(f"Failed to load {dataset_name} {dataset_config} ({e}), trying wikitext-2-raw-v1")
+                        dataset = load_dataset(str(dataset_name), 'wikitext-2-raw-v1', split=dataset_split)
                 else:
                     dataset = load_dataset(str(dataset_name), split=dataset_split)
 
@@ -340,19 +350,28 @@ class GaLoreTrainer:
             if isinstance(text, str):
                 text = [text]
 
-            # Ensure we never produce all-padding sequences (which can yield loss=0
-            # when all labels become -100). Replace empty/None texts with a small
-            # non-empty string.
+            # Debug: log first batch content
+            if not hasattr(self, '_logged_tokenize_sample'):
+                self._logged_tokenize_sample = True
+                self.logger.info(f"[Tokenize] First batch size: {len(text)}")
+                self.logger.info(f"[Tokenize] First sample raw: {repr(text[0])[:200]}")
+
+            # Ensure we never produce all-padding sequences.
+            # Instead of filling with EOS (which gets masked), we SKIP empty lines.
+            # If the entire batch is empty, we insert one filler to keep the pipeline moving,
+            # but warn about it.
             filler = (self.tokenizer.eos_token or self.tokenizer.pad_token or "Hello")
             cleaned = []
             for t in text:
-                if not isinstance(t, str):
-                    cleaned.append(filler)
-                    continue
-                if not t.strip():
-                    cleaned.append(filler)
-                else:
+                if isinstance(t, str) and t.strip():
                     cleaned.append(t)
+            
+            if not cleaned:
+                if not hasattr(self, '_warned_empty_batch'):
+                    self._warned_empty_batch = True
+                    self.logger.warning(f"[Tokenize] Batch consists ENTIRELY of empty text! Using filler fallback.")
+                cleaned = [filler]
+            
             text = cleaned
 
             # IMPORTANT: do *not* pad to max_length at dataset creation time.
@@ -456,6 +475,20 @@ class GaLoreTrainer:
             )
 
         self.logger.info(f"Dataset prepared with {len(tokenized_dataset)} examples")
+        
+        # Debug: check first sample of prepared dataset
+        if len(tokenized_dataset) > 0:
+            try:
+                s = tokenized_dataset[0]
+                ids = s.get('input_ids', [])
+                self.logger.info(f"[Dataset] First sample input_ids length: {len(ids)}")
+                self.logger.info(f"[Dataset] First sample input_ids[:20]: {ids[:20]}")
+                # Check if it's just filler
+                filler_id = self.tokenizer.convert_tokens_to_ids(self.tokenizer.eos_token or self.tokenizer.pad_token)
+                if len(ids) > 0 and all(x == filler_id for x in ids):
+                    self.logger.warning("[Dataset] First sample consists ONLY of filler tokens! Loss will be 0.")
+            except Exception as e:
+                self.logger.warning(f"Could not inspect first sample: {e}")
         self.memory_tracker.log_memory("GaLore", "Dataset prepared")
         return tokenized_dataset
     
