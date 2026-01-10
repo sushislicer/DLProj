@@ -317,7 +317,19 @@ class GaLoreTrainer:
                             text = examples[k]
                             break
             if text is None:
-                text = ''
+                # When running with batched=True, we must return a batch.
+                # Infer batch size from any list-like field.
+                bs = 1
+                if isinstance(examples, dict):
+                    for _k, v in examples.items():
+                        if isinstance(v, list):
+                            bs = len(v)
+                            break
+                text = [''] * bs
+
+            # Normalize for batched map: ensure list[str]
+            if isinstance(text, str):
+                text = [text]
 
             tokens = self.tokenizer(
                 text,
@@ -329,6 +341,14 @@ class GaLoreTrainer:
             # Causal LM labels: ignore padding tokens.
             input_ids = tokens['input_ids']
             attn = tokens.get('attention_mask', None)
+
+            # Normalize tokenizer output to list-of-lists.
+            # Some tokenizers return a single list[int] when given a single string.
+            if input_ids and isinstance(input_ids[0], int):
+                input_ids = [input_ids]
+            if attn is not None and attn and isinstance(attn[0], int):
+                attn = [attn]
+
             if attn is None:
                 tokens['labels'] = input_ids
             else:
@@ -336,6 +356,11 @@ class GaLoreTrainer:
                 for ids, m in zip(input_ids, attn):
                     labels.append([tok if mask == 1 else -100 for tok, mask in zip(ids, m)])
                 tokens['labels'] = labels
+
+            # Ensure we return the normalized structures.
+            tokens['input_ids'] = input_ids
+            if attn is not None:
+                tokens['attention_mask'] = attn
             return tokens
         
         # Tokenize dataset. If we ended up with a python list (streaming fallback),
