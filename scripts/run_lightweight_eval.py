@@ -49,6 +49,11 @@ def main():
     
     # Ensure quantization is enabled (as per user request for 4-bit baseline)
     runner.config['gpu']['quantization']['enabled'] = True
+
+    # Disable FlashAttention auto-install to prevent hanging on compilation
+    runner.config.setdefault('advanced', {})
+    runner.config['advanced']['auto_install_flash_attention'] = False
+    runner.config['advanced']['use_flash_attention'] = False # Fallback to SDPA/eager
     
     logger.info(f"Starting lightweight evaluation for 0.5B and 7B models with {args.num_samples} samples...")
     
