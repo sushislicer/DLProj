@@ -1,6 +1,13 @@
 \section{Method}
 \label{sec:method}
 
+\subsection{Transformer layer parameterization}
+We focus on decoder-only Transformer blocks.
+Each block contains self-attention projections
+$\W_q,\W_k,\W_v,\W_o$ and an MLP with projections
+$\W_{\mathrm{up}},\W_{\mathrm{gate}},\W_{\mathrm{down}}$.
+In our implementation, these are the \texttt{target\_modules} for adapter insertion and (optionally) rotation-aware quantization.
+
 \subsection{Problem setup}
 We consider a pretrained causal LLM with parameters $\theta$.
 For a given task distribution $(x,y) \sim \mathcal{D}$, adaptation minimizes an expected loss
@@ -13,7 +20,16 @@ Let $\Q_b(\cdot)$ denote a $b$-bit quantizer (e.g., NF4 with double quantization
 We therefore care about the quantized model $f(x;\Q_b(\theta'))$.
 
 \subsection{Overview of \method}
-\method decomposes adaptation into three stages:
+\method decomposes adaptation into three stages and makes explicit the \emph{decomposition between a low-rank update and a quantized residual base}.
+For each targeted weight matrix $\W$, we conceptually write
+\begin{equation}
+  \W \approx \W_{\mathrm{res}} + \Delta\W, \qquad \mathrm{rank}(\Delta\W)\le r.
+  \label{eq:residual_decomp}
+\end{equation}
+The adapter parameters represent $\Delta\W$ while $\W_{\mathrm{res}}$ is the residual/base component that will be quantized.
+In the codebase, PiSSA produces PEFT adapter weights and a saved ``residual model'' checkpoint that is subsequently quantized.
+
+Concretely, the stages are:
 \begin{enumerate}
   \item \textbf{PiSSA stage (adapter construction).} Insert LoRA modules into selected linear layers and initialize the low-rank factors using PiSSA~\cite{pissa2024}.
   \item \textbf{SpinQuant stage (rotation-aware residual quantization).} Apply an orthogonal mixing transform to selected weight matrices before quantization (SpinQuant-inspired)~\cite{spinquant2024}.
@@ -30,14 +46,18 @@ LoRA parameterizes an update as
 \end{equation}
 where $\B\in\R^{d_{\text{out}}\times r}$ and $\A\in\R^{r\times d_{\text{in}}}$ with $r \ll \min(d_{\text{out}},d_{\text{in}})$.
 PiSSA initializes $(\A,\B)$ from the truncated SVD of $\W$.
-Let $\W \approx \U_r \Sigma_r \V_r^\top$ be the rank-$r$ approximation.
+Let $\W \approx \bm{U}_r \Sigma_r \bm{V}_r^\top$ be the rank-$r$ approximation.
 One convenient factorization is
 \begin{equation}
-  \B_0 = \U_r\,\Sigma_r^{1/2}, \qquad \A_0 = \Sigma_r^{1/2}\,\V_r^\top,
+  \B_0 = \bm{U}_r\,\Sigma_r^{1/2}, \qquad \A_0 = \Sigma_r^{1/2}\,\bm{V}_r^\top,
   \label{eq:pissa_init}
 \end{equation}
 which aligns the update subspace with dominant directions of $\W$.
 In our pipeline implementation, PiSSA is applied through PEFT's PiSSA initializer while keeping the base weights unchanged.
+
+\paragraph{Architecture-specific insertion.}
+Adapters are inserted into attention and MLP projections (e.g., \texttt{q\_proj}, \texttt{k\_proj}, \texttt{v\_proj}, \texttt{o\_proj}, \texttt{gate\_proj}, \texttt{up\_proj}, \texttt{down\_proj}).
+This choice matches common PEFT practice and concentrates capacity in the highest-impact linear maps.
 
 \subsection{SpinQuant-inspired orthogonal mixing before quantization}
 Quantization error is often dominated by outlier directions.
@@ -56,8 +76,18 @@ At inference time, the rotation can be absorbed into activations: for input acti
 
 \paragraph{SpinQuant-lite (fixed Hadamard backend).}
 Learning $\R$ per-layer can be costly.
-To keep runtime bounded, we default to a blockwise Hadamard transform $\R=\mathrm{diag}(\H,\H,\dots)$ where $\H\H^\top=\I$ and $\H$ is the normalized Hadamard matrix.
+To keep runtime bounded, we default to a blockwise Hadamard transform
+$\R=\mathrm{diag}(\bm{H},\bm{H},\dots)$ where $\bm{H}\bm{H}^\top=\I$ and $\bm{H}$ is the normalized Hadamard matrix.
 This acts as a cheap mixing transform that reduces per-dimension variance and typically lowers quantization error.
+
+\paragraph{Quantization objective view.}
+SpinQuant can be seen as choosing $\R$ to minimize a rotated-space reconstruction error such as
+\begin{equation}
+  \min_{\R\in \mathcal{O}(d_{\mathrm{in}})}\; \|\Q_b(\W\R) - \W\R\|_F^2,
+  \label{eq:spinquant_obj}
+\end{equation}
+where $\mathcal{O}(d)$ is the orthogonal group.
+Our Hadamard backend fixes $\R$ to a structured orthogonal matrix to avoid the per-layer optimization loop.
 
 \subsection{GaLore-style projected-gradient adapter training}
 Given the adapter parameters $\phi$ (collecting all $\A$ and $\B$ factors), we optimize
@@ -75,3 +105,5 @@ For any 2D parameter $\bm{P}\in\R^{m\times n}$ with gradient $\bm{G}$, GaLore co
 where $\U\in\R^{m\times k}$ and $\V\in\R^{n\times k}$.
 In our implementation, we optionally apply this projection to adapter gradients on a fixed schedule.
 
+\paragraph{Practical note.}
+In mixed-precision and checkpointed training, we ensure that checkpointed blocks receive at least one input with \texttt{requires\_grad=True}, which is required by \texttt{torch.utils.checkpoint}.

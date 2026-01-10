@@ -18,6 +18,21 @@ Here $\ell$ indexes linear layers, $\Delta\W_\ell$ is the low-rank update induce
 \method can be interpreted as an alternating approximation to \cref{eq:joint_obj}:
 PiSSA provides an initialization for the low-rank constraint, SpinQuant-lite fixes a structured choice of $\R_\ell$, and GaLore accelerates optimization over $\phi$.
 
+\subsection{A simple error decomposition}
+Consider a single linear layer with quantized residual weights and a low-rank adapter:
+\begin{equation}
+  \W_{\text{serve}} \;=\; \Q_b(\W_{\mathrm{res}}\R)\,\R^\top + \Delta\W.
+  \label{eq:serve_weight}
+\end{equation}
+For an input activation $\bm{x}$, the output error relative to a full-precision adapted layer $\W_{\mathrm{res}}+\Delta\W$ is
+\begin{equation}
+  \delta\bm{y}
+  = \bm{x}\Big(\Q_b(\W_{\mathrm{res}}\R)\,\R^\top - \W_{\mathrm{res}}\Big)^\top.
+  \label{eq:output_error_residual}
+\end{equation}
+This highlights the role of rotations: $\R$ changes the distribution of entries in $\W_{\mathrm{res}}\R$ and thus the quantization perturbation, without changing $\|\W_{\mathrm{res}}\|_F$.
+In practice, a fixed Hadamard transform is an inexpensive way to reduce structured quantization error.
+
 \subsection{Why orthogonal mixing helps quantization}
 Quantization introduces an error $\bm{E}_\ell = \Q_b(\W_\ell\R_\ell) - \W_\ell\R_\ell$.
 For an input activation $\bm{x}$, the induced output perturbation is
@@ -32,6 +47,15 @@ Orthogonal mixing redistributes energy across dimensions without changing the Fr
 \end{equation}
 In particular, a Hadamard transform approximately ``whitens'' coordinates by mixing signs and permuting mass, which empirically reduces outlier dominance and improves quantization fidelity.
 This provides an inexpensive alternative to learned rotations when runtime is limited.
+
+\paragraph{A simple bound (informal).}
+Assume the layer input activations satisfy $\|\bm{x}\|_2 \le B$.
+Then from \cref{eq:delta_y},
+\begin{equation}
+  \|\delta\bm{y}\|_2 \le B\,\|\bm{E}_\ell\|_2 \le B\,\|\bm{E}_\ell\|_F.
+  \label{eq:error_bound}
+\end{equation}
+Thus any rotation $\R_\ell$ that reduces the typical quantization residual norm $\|\bm{E}_\ell\|_F$ (e.g., by suppressing outlier concentration) improves a worst-case output perturbation bound.
 
 \subsection{Projected gradients as implicit low-rank regularization}
 GaLore-style projection in \cref{eq:galore_proj} can be interpreted as optimizing with gradients constrained to a rank-$k$ tangent set.

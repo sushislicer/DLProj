@@ -201,6 +201,14 @@ class GaLoreTrainer:
         except Exception:
             pass
 
+        # Gradient checkpointing and cache are incompatible; enforce a safe default.
+        try:
+            if bool(self.config.get('gradient_checkpointing', True)) and hasattr(self.model, 'config'):
+                if hasattr(self.model.config, 'use_cache'):
+                    self.model.config.use_cache = False
+        except Exception:
+            pass
+
         def _force_only_adapter_trainable(m: torch.nn.Module) -> int:
             """Safety valve: train adapters only.
 
@@ -254,7 +262,13 @@ class GaLoreTrainer:
         max_samples = self.config.get('max_samples', 10000)
         
         try:
-            dataset = load_dataset(dataset_name, split=dataset_split)
+            # `datasets` has changed over time; prefer canonical dataset IDs.
+            # - `c4` often maps to `allenai/c4` but can emit warnings in newer versions.
+            # - We explicitly use `allenai/c4` to avoid legacy script issues.
+            if str(dataset_name).lower() == 'c4':
+                dataset = load_dataset('allenai/c4', 'en', split=dataset_split)
+            else:
+                dataset = load_dataset(dataset_name, split=dataset_split)
             if max_samples and len(dataset) > max_samples:
                 dataset = dataset.select(range(max_samples))
         except Exception as e:
@@ -267,14 +281,37 @@ class GaLoreTrainer:
         
         # Tokenize dataset
         def tokenize_function(examples):
+            # Robustly pick a text field.
+            text = None
+            if isinstance(examples, dict):
+                if 'text' in examples:
+                    text = examples['text']
+                else:
+                    # Common alternatives
+                    for k in ('content', 'prompt', 'question'):
+                        if k in examples:
+                            text = examples[k]
+                            break
+            if text is None:
+                text = ''
+
             tokens = self.tokenizer(
-                examples['text'],
+                text,
                 truncation=True,
                 max_length=self.config.get('max_length', 512),
                 padding='max_length'
             )
-            # Standard causal LM labels
-            tokens['labels'] = tokens['input_ids'].copy()
+
+            # Causal LM labels: ignore padding tokens.
+            input_ids = tokens['input_ids']
+            attn = tokens.get('attention_mask', None)
+            if attn is None:
+                tokens['labels'] = input_ids
+            else:
+                labels = []
+                for ids, m in zip(input_ids, attn):
+                    labels.append([tok if mask == 1 else -100 for tok, mask in zip(ids, m)])
+                tokens['labels'] = labels
             return tokens
         
         tokenized_dataset = dataset.map(
@@ -390,6 +427,7 @@ class GaLoreTrainer:
             save_total_limit=self.config.get('save_total_limit', 3),
             fp16=True,
             gradient_checkpointing=bool(self.config.get('gradient_checkpointing', True)),
+            lr_scheduler_type=str(self.config.get('lr_scheduler_type', 'constant_with_warmup')),
             optim='adamw_torch',  # We'll use custom GaLore optimizer
             report_to=report_to,
             logging_dir=os.path.join(self.config['output_dir'], 'logs'),
@@ -501,45 +539,59 @@ class GaLoreTrainer:
                 # g: [m, n]
                 m, n = g.shape
                 k = max(1, min(self.rank, m, n))
-                # Full SVD is fine for adapter-sized matrices, but the default CUDA
-                # driver can fail to converge on ill-conditioned gradients.
-                # Be robust:
-                # 1) run SVD in float32
-                # 2) if CUDA SVD fails, fall back to CPU
-                # 3) if CPU also fails, fall back to QR-based bases
+                # SVD can fail to converge on ill-conditioned inputs (common in fp16
+                # training or early steps). Be robust and avoid hard-crashes.
+                # Strategy:
+                # 1) sanitize NaN/Inf -> 0
+                # 2) try GPU SVD in fp32
+                # 3) if it fails, try randomized low-rank SVD (`torch.svd_lowrank`)
+                # 4) last resort: random orthonormal bases via QR
 
                 dev = g.device
                 dtype = g.dtype
-                g32 = g.detach().to(dtype=torch.float32)
 
-                def _svd_basis(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-                    U, _S, Vh = torch.linalg.svd(x, full_matrices=False)
-                    U_k = U[:, :k]
-                    V_k = Vh[:k, :].t()  # [n, k]
-                    return U_k, V_k
+                g32 = torch.nan_to_num(g.detach().to(dtype=torch.float32), nan=0.0, posinf=0.0, neginf=0.0)
+
+                def _rand_ortho(m_: int, k_: int) -> torch.Tensor:
+                    z = torch.randn(m_, k_, device=dev, dtype=torch.float32)
+                    q, _ = torch.linalg.qr(z, mode='reduced')
+                    return q[:, :k_]
+
+                # If the gradient is all zeros after sanitization, just return any bases.
+                if float(torch.norm(g32).item()) == 0.0:
+                    U_k = _rand_ortho(m, k)
+                    V_k = _rand_ortho(n, k)
+                    return U_k.to(dtype=dtype), V_k.to(dtype=dtype)
 
                 try:
-                    U_k, V_k = _svd_basis(g32)
-                except Exception as e_cuda:
-                    # CPU fallback
-                    try:
-                        U_k, V_k = _svd_basis(g32.cpu())
-                        U_k = U_k.to(device=dev)
-                        V_k = V_k.to(device=dev)
-                    except Exception:
-                        # Last-resort fallback: QR bases
-                        # U from QR(g), V from QR(g^T)
-                        q1, _ = torch.linalg.qr(g32, mode='reduced')
-                        q2, _ = torch.linalg.qr(g32.t(), mode='reduced')
-                        U_k = q1[:, :k]
-                        V_k = q2[:, :k]
+                    U, _S, Vh = torch.linalg.svd(g32, full_matrices=False)
+                    U_k = U[:, :k]
+                    V_k = Vh[:k, :].t()
+                    return U_k.to(dtype=dtype), V_k.to(dtype=dtype)
+                except Exception:
+                    pass
 
-                # Cast back to match gradient dtype
+                # Randomized low-rank SVD (more stable in some cases).
+                try:
+                    # `q` is an orthonormal basis for the range of g32.
+                    # U approx = q @ U_hat.
+                    U_hat, _S, V = torch.svd_lowrank(g32, q=min(k + 8, min(m, n)))
+                    # U_hat: [m, q] (already orthonormal-ish), V: [n, q]
+                    U_k = U_hat[:, :k]
+                    V_k = V[:, :k]
+                    return U_k.to(dtype=dtype), V_k.to(dtype=dtype)
+                except Exception:
+                    pass
+
+                # Last resort: random bases.
+                U_k = _rand_ortho(m, k)
+                V_k = _rand_ortho(n, k)
                 return U_k.to(dtype=dtype), V_k.to(dtype=dtype)
 
             def _project(self, g: torch.Tensor, U: torch.Tensor, V: torch.Tensor) -> torch.Tensor:
                 # Project g onto span(U) x span(V)
-                return U @ (U.t() @ g @ V) @ V.t()
+                out = U @ (U.t() @ g @ V) @ V.t()
+                return torch.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
 
             def maybe_update_and_project(self, model: torch.nn.Module):
                 if not self.enabled:
@@ -567,8 +619,14 @@ class GaLoreTrainer:
 
                 for name, p in model.named_parameters():
                     g = p.grad
-                    if g is None or g.ndim != 2:
+                    # Only project trainable (adapter) parameters.
+                    if (not getattr(p, 'requires_grad', False)) or g is None or g.ndim != 2:
                         continue
+
+                    # Skip invalid gradients.
+                    if not torch.isfinite(g).all():
+                        p.grad = torch.nan_to_num(g, nan=0.0, posinf=0.0, neginf=0.0)
+                        g = p.grad
 
                     # Compute drift criterion if we already have a basis.
                     if name in self.bases and not force_update:
@@ -664,6 +722,16 @@ class GaLoreTrainer:
                     loss = loss / self.args.gradient_accumulation_steps
 
                 self.accelerator.backward(loss)
+
+                # Sanitize gradients to avoid NaN/Inf propagating into projection / grad norm.
+                # This is especially important under fp16 + checkpointing.
+                try:
+                    for p in model.parameters():
+                        if p.grad is None:
+                            continue
+                        p.grad = torch.nan_to_num(p.grad, nan=0.0, posinf=0.0, neginf=0.0)
+                except Exception:
+                    pass
 
                 # Apply low-rank gradient projection (GaLore-like) before optimizer step.
                 # Only do this on *optimizer steps* (after gradient accumulation)

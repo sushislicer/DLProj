@@ -23,3 +23,8 @@ We propose \method, a simple pipeline that composes three complementary ideas:
   \item A concise mathematical view that connects low-rank adaptation, orthogonal mixing for quantization, and projected-gradient training.
   \item An evaluation protocol and benchmark harness for difficult reasoning tasks (AIME, MATH, GPQA, LiveCodeBench).
 \end{itemize}
+
+\paragraph{What is novel about the combination?}
+The novelty is in treating \emph{quantized deployment} as a first-class constraint throughout the adaptation pipeline.
+PiSSA provides a structured low-rank parameterization, SpinQuant-style orthogonal mixing reduces the quantization residual of the base/residual weights, and GaLore-style projection constrains optimization dynamics.
+Together, these components approximate a joint constrained objective over (i) low-rank updates and (ii) rotation-aware quantized residual weights, which is not addressed by applying any single component in isolation.
