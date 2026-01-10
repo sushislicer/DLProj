@@ -317,7 +317,8 @@ def download_math_dataset(output_path: str = 'datasets/math'):
         # The previous repo id ("EleutherAI/math") no longer exists on HF.
         # Use the widely-available MATH competition dataset.
         dataset_id = os.environ.get('BENCH_MATH_HF_DATASET', 'qwedsacf/competition_math')
-        split = os.environ.get('BENCH_MATH_HF_SPLIT', 'test')
+        # qwedsacf/competition_math only has 'train' split
+        split = os.environ.get('BENCH_MATH_HF_SPLIT', 'train')
 
         dataset = load_dataset(dataset_id, split=split)
 

@@ -222,7 +222,7 @@ def download_aime_dataset(output_path: str = 'datasets/aime'):
         # Try a configurable dataset id first, then fall back to a small list
         # of known/commonly-used community mirrors.
         dataset_id = os.environ.get('BENCH_AIME_HF_DATASET', '').strip()
-        split = os.environ.get('BENCH_AIME_HF_SPLIT', 'test')
+        split = os.environ.get('BENCH_AIME_HF_SPLIT', 'train')
 
         candidates = [
             dataset_id,

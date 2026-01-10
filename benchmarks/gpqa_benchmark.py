@@ -290,7 +290,7 @@ def download_gpqa_dataset(output_path: str = 'datasets/gpqa'):
         from datasets import load_dataset
 
         dataset_id = os.environ.get('BENCH_GPQA_HF_DATASET', '').strip() or 'idavidrein/gpqa-extended'
-        split = os.environ.get('BENCH_GPQA_HF_SPLIT', 'test')
+        split = os.environ.get('BENCH_GPQA_HF_SPLIT', 'train')
 
         # GPQA is often gated; user may need to pass a token.
         # Allow overriding the dataset id via env var.
