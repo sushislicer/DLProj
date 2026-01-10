@@ -94,6 +94,47 @@ class GaLoreTrainer:
                 return cand
             return None
 
+        def _maybe_patch_pissa_adapter_config_for_quantized_base_(adapter_dir: str) -> bool:
+            """Patch a local PEFT adapter config to avoid PiSSA init on 4/8-bit base.
+
+            PEFT's PiSSA init reads float base weights and can error if the base
+            model uses bitsandbytes Linear4bit/8bit modules. When we load an
+            already-saved adapter for training, we can skip PiSSA init and just
+            load the adapter weights.
+            """
+            cfg_path = os.path.join(str(adapter_dir), 'adapter_config.json')
+            if not os.path.isfile(cfg_path):
+                return False
+            try:
+                import json
+
+                with open(cfg_path, 'r') as f:
+                    cfg = json.load(f)
+            except Exception:
+                return False
+
+            init = cfg.get('init_lora_weights', None)
+            if str(init).strip().lower() != 'pissa':
+                return False
+
+            # Back up once.
+            bak_path = cfg_path + '.bak_pissa'
+            try:
+                if not os.path.exists(bak_path):
+                    with open(bak_path, 'w') as f:
+                        json.dump(cfg, f, indent=2)
+            except Exception:
+                pass
+
+            cfg['init_lora_weights'] = True
+            cfg['_patched_disable_pissa_init_for_quantized_base'] = True
+            try:
+                with open(cfg_path, 'w') as f:
+                    json.dump(cfg, f, indent=2)
+                return True
+            except Exception:
+                return False
+
         # Load quantized base model
         quantized_model_path = config['quantized_model_path']
         self.logger.info(f"Loading quantized base model from {quantized_model_path}")
@@ -107,14 +148,18 @@ class GaLoreTrainer:
             attn_implementation="sdpa",
         )
 
-        # If the base model is bitsandbytes-quantized, PiSSA init will fail.
-        # Fall back to a float16 checkpoint if available (produced by SpinQuant stage).
-        if _model_uses_bnb_quant(self.base_model):
+        # If the base model is bitsandbytes-quantized, PEFT may try to run PiSSA
+        # init when loading adapters (if adapter_config.json has init_lora_weights='pissa').
+        # We can either:
+        #  - reload an fp16 base checkpoint (best if available), OR
+        #  - patch adapter_config.json to disable PiSSA init and proceed on 4-bit base.
+        self._bnb_base_model = bool(_model_uses_bnb_quant(self.base_model))
+        if self._bnb_base_model:
             fp16_path = config.get('fp16_base_model_path') or _infer_fp16_fallback_path(quantized_model_path)
             if fp16_path:
                 self.logger.warning(
-                    "Detected bitsandbytes-quantized base model; PiSSA adapter init requires fp16/bf16/fp32. "
-                    f"Reloading base model from fp16 checkpoint: {fp16_path}"
+                    "Detected bitsandbytes-quantized base model; reloading fp16 checkpoint for safer PEFT adapter injection: "
+                    f"{fp16_path}"
                 )
                 try:
                     del self.base_model
@@ -129,11 +174,11 @@ class GaLoreTrainer:
                     attn_implementation="sdpa",
                 )
                 quantized_model_path = fp16_path
+                self._bnb_base_model = bool(_model_uses_bnb_quant(self.base_model))
             else:
-                raise RuntimeError(
-                    "Base model appears to be bitsandbytes-quantized, but no fp16 fallback checkpoint was found. "
-                    "PiSSA adapter init requires fp16/bf16/fp32 weights. "
-                    "Fix: rerun SpinQuant with use_bnb_quantization=false, or provide a fp16 checkpoint via --fp16_base_model_path."
+                self.logger.warning(
+                    "Detected bitsandbytes-quantized base model and no fp16 fallback checkpoint found. "
+                    "Proceeding with 4-bit base; will patch adapter_config.json to disable PiSSA init if needed."
                 )
         
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -149,6 +194,18 @@ class GaLoreTrainer:
         adapter_path = config['adapter_path']
         self.logger.info(f"Loading PiSSA adapters from {adapter_path}")
         self.memory_tracker.log_memory("GaLore", "Loading PiSSA adapters...")
+
+        # If the base is 4/8-bit (bnb), disable PiSSA init for local adapters.
+        # This aligns with the working notebook flow where PiSSA init happened
+        # *before* quantization and we only need to load adapter weights here.
+        try:
+            if bool(getattr(self, '_bnb_base_model', False)) and os.path.isdir(str(adapter_path)):
+                if _maybe_patch_pissa_adapter_config_for_quantized_base_(str(adapter_path)):
+                    self.logger.warning(
+                        f"Patched adapter_config.json to disable PiSSA init for quantized base: {adapter_path}"
+                    )
+        except Exception:
+            pass
         
         self.model = PeftModel.from_pretrained(
             self.base_model,
@@ -575,8 +632,15 @@ class GaLoreTrainer:
 
         # Some galore_torch builds expose GaLoreAdamW but without projection
         # parameters (i.e., behaves like AdamW). We still use it if present.
+        # We pass GaLore params via param_groups to ensure they are used.
         optimizer = GaLoreAdamW(
-            trainable_params,
+            [{
+                'params': trainable_params,
+                'rank': int(galore_config['rank']),
+                'update_proj_gap': int(galore_config['update_proj_gap']),
+                'scale': float(galore_config['scale']),
+                'proj_type': str(galore_config['proj_type']),
+            }],
             lr=galore_config['learning_rate'],
             weight_decay=galore_config.get('weight_decay', 0.01),
             betas=(0.9, 0.999),
